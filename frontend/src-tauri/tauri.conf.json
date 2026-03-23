@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Reports",
+  "version": "0.1.0",
+  "identifier": "com.rakinzisilver.reports",
+  "build": {
+    "beforeDevCommand": "npm run desktop:build-sidecar && npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Reports",
+        "width": 1440,
+        "height": 960,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "externalBin": [
+      "binaries/reports-api"
+    ]
+  }
+}
