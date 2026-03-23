@@ -36,6 +36,10 @@ def extract_econet_ai() -> dict[int, list[str]]:
     return _extract_slides(TEMPLATES_DIR / "Econet AI February 2026 Website Report.pptx")
 
 
+def extract_infraco() -> dict[int, list[str]]:
+    return _extract_slides(TEMPLATES_DIR / "Econet_InfraCo_February_2026 (1).pptx")
+
+
 def extract_ecocash() -> dict[int, list[str]]:
     return _extract_slides(TEMPLATES_DIR / "Ecocash February 2026 Website Report.pptx")
 

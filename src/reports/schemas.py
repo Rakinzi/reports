@@ -5,6 +5,7 @@ from typing import Literal
 ReportName = Literal[
     "econet",
     "econet_ai",
+    "infraco",
     "ecocash",
     "ecosure",
     "zimplats",

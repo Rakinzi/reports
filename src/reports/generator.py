@@ -45,6 +45,7 @@ logger = configure_logging()
 GA4_PROPERTIES = {
     "cancer_serve": "454873082",
     "econet_ai":    "511212348",
+    "infraco":      "516617515",
     "zimplats":     "385365994",
     "ecocash":      "386950925",
     "econet":       "386649040",
@@ -54,6 +55,7 @@ GA4_PROPERTIES = {
 TEMPLATES = {
     "econet":       "Econet-February 2026 Website Report.pptx",
     "econet_ai":    "Econet AI February 2026 Website Report.pptx",
+    "infraco":      "Econet_InfraCo_February_2026 (1).pptx",
     "ecocash":      "Ecocash February 2026 Website Report.pptx",
     "ecosure":      "Ecosure January 2026 Website Report (1).pptx",
     "zimplats":     "Zimplats February 2026 Website Report.pptx",
@@ -74,26 +76,142 @@ def _ga4_url(property_key: str, section_fragment: str) -> str:
     return f"https://analytics.google.com/analytics/web/#/p{pid}{section_fragment}"
 
 
-def _ga4_property_fragment(property_key: str) -> str:
-    return f"/p{GA4_PROPERTIES[property_key]}"
+def _ga4_property_token(property_key: str) -> str:
+    return f"p{GA4_PROPERTIES[property_key]}"
+
+
+def _ga4_navigation_url(page, property_key: str, section_fragment: str) -> str:
+    property_token = _ga4_property_token(property_key)
+    match = re.search(rf"(https://analytics\.google\.com/analytics/web/#/[^/]*{re.escape(property_token)})", page.url)
+    if match:
+        return f"{match.group(1)}{section_fragment}"
+    return _ga4_url(property_key, section_fragment)
 
 
 def _ensure_expected_ga4_property(page, property_key: str, timeout: int = 15000) -> None:
-    expected_fragment = _ga4_property_fragment(property_key)
+    expected_token = _ga4_property_token(property_key)
     page.wait_for_function(
         "expected => window.location.href.includes(expected)",
-        arg=expected_fragment,
+        arg=expected_token,
         timeout=timeout,
     )
 
 
-def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: int = 45000) -> None:
-    url = _ga4_url(property_key, section_fragment)
-    expected_fragment = _ga4_property_fragment(property_key)
+def _open_analytics_root(page) -> None:
+    try:
+        page.goto("https://analytics.google.com/analytics/web/", wait_until="domcontentloaded", timeout=30000)
+    except Exception:
+        page.goto("https://analytics.google.com/analytics/web/", wait_until="load", timeout=45000)
+    page.wait_for_timeout(3000)
+
+
+def _click_first_visible(locator) -> bool:
+    count = locator.count()
+    for index in range(count):
+        candidate = locator.nth(index)
+        try:
+            candidate.wait_for(state="visible", timeout=1500)
+            candidate.click()
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def _click_nth_visible(locator, target_visible_index: int) -> bool:
+    visible_index = 0
+    count = locator.count()
+    for index in range(count):
+        candidate = locator.nth(index)
+        try:
+            candidate.wait_for(state="visible", timeout=1500)
+        except Exception:
+            continue
+        if visible_index == target_visible_index:
+            candidate.click()
+            return True
+        visible_index += 1
+    return False
+
+
+def _resolve_post_click_page(page, previous_page_count: int):
+    page.wait_for_timeout(2500)
+    pages = page.context.pages
+    if len(pages) > previous_page_count:
+        new_page = pages[-1]
+        try:
+            new_page.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        new_page.bring_to_front()
+        logger.info("GA4 search result opened a new tab. current_url=%s", new_page.url)
+        return new_page
+    return page
+
+
+def _switch_ga4_property_via_search(page, property_key: str):
+    property_id = GA4_PROPERTIES[property_key]
+    logger.info("Switching GA4 property via search. property_key=%s property_id=%s", property_key, property_id)
+
+    _open_analytics_root(page)
+
+    search_input = None
+    search_selectors = [
+        lambda: page.get_by_role("searchbox").first,
+        lambda: page.get_by_role("textbox", name=re.compile("search", re.I)).first,
+        lambda: page.locator('input[aria-label*="Search"], input[placeholder*="Search"]').first,
+    ]
+    for resolve in search_selectors:
+        try:
+            candidate = resolve()
+            candidate.wait_for(state="visible", timeout=4000)
+            search_input = candidate
+            break
+        except Exception:
+            continue
+
+    if search_input is None:
+        raise RuntimeError("Could not find the GA4 search bar to switch properties.")
+
+    search_input.click()
+    search_input.fill(property_id)
+    page.wait_for_timeout(2000)
+
+    result_candidates = page.locator('[role="option"], [role="menuitem"], a, button, li')
+    exact_result = result_candidates.filter(
+        has_text=re.compile(rf"\b{re.escape(property_id)}\b")
+    )
+    previous_page_count = len(page.context.pages)
+
+    if _click_nth_visible(result_candidates, 1):
+        logger.info("Selected second visible GA4 search result for property_id=%s", property_id)
+    elif _click_first_visible(exact_result):
+        logger.info("Selected GA4 search result matching property_id=%s", property_id)
+    elif _click_first_visible(result_candidates):
+        logger.info("Selected first visible GA4 search result for property_id=%s", property_id)
+    else:
+        try:
+            search_input.press("Enter")
+            logger.info("Submitted GA4 search via Enter for property_id=%s", property_id)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not select a GA4 search result for property '{property_key}' ({property_id})."
+            ) from exc
+
+    page = _resolve_post_click_page(page, previous_page_count)
+    _ensure_expected_ga4_property(page, property_key, timeout=20000)
+    page.wait_for_timeout(2500)
+    return page
+
+
+def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: int = 45000):
+    expected_token = _ga4_property_token(property_key)
 
     last_error: Exception | None = None
     for attempt in range(1, 4):
         try:
+            page = _switch_ga4_property_via_search(page, property_key)
+            url = _ga4_navigation_url(page, property_key, section_fragment)
             logger.info(
                 "Navigating to GA4 property=%s section=%s attempt=%s url=%s",
                 GA4_PROPERTIES[property_key],
@@ -109,7 +227,7 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
             _ensure_expected_ga4_property(page, property_key, timeout=15000)
             page.wait_for_timeout(3000)
             logger.info("GA4 navigation confirmed for property=%s current_url=%s", GA4_PROPERTIES[property_key], page.url)
-            return
+            return page
         except Exception as exc:
             last_error = exc
             logger.warning(
@@ -129,7 +247,7 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
     current_url = page.url
     raise RuntimeError(
         f"Could not open the selected GA4 property for '{property_key}'. "
-        f"Expected URL containing '{expected_fragment}', but Analytics stayed on '{current_url}'."
+        f"Expected URL containing '{expected_token}', but Analytics stayed on '{current_url}'."
     ) from last_error
 
 
@@ -458,7 +576,7 @@ def capture_screenshots_and_metrics(
             page.bring_to_front()
 
             # --- Home page: set date range + scrape metrics ---
-            _goto_ga4_section(page, report_name, "/home")
+            page = _goto_ga4_section(page, report_name, "/home")
             _set_date_range(page, start_date, end_date)
             home_metrics = _scrape_home_metrics(page)
 
@@ -605,7 +723,7 @@ def capture_screenshots_and_metrics(
 
             # --- Screenshots for remaining GA4 sections ---
             for label, fragment in GA4_SECTIONS:
-                _goto_ga4_section(page, report_name, fragment)
+                page = _goto_ga4_section(page, report_name, fragment)
                 path = out_dir / f"{label}.png"
                 page.screenshot(path=str(path), full_page=False)
                 screenshots[label] = path

@@ -153,6 +153,13 @@ def get_econet_ai():
     return JSONResponse(extract_econet_ai())
 
 
+@app.get("/reports/infraco")
+def get_infraco():
+    from .extractors import extract_infraco
+
+    return JSONResponse(extract_infraco())
+
+
 @app.get("/reports/ecocash")
 def get_ecocash():
     from .extractors import extract_ecocash

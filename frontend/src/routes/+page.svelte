@@ -37,6 +37,7 @@
 	const REPORT_OPTIONS = [
 		{ value: 'econet_ai', label: 'Econet AI' },
 		{ value: 'econet', label: 'Econet' },
+		{ value: 'infraco', label: 'Infraco' },
 		{ value: 'ecocash', label: 'EcoCash' },
 		{ value: 'ecosure', label: 'Ecosure' },
 		{ value: 'zimplats', label: 'Zimplats' },
