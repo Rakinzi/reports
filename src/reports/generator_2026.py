@@ -31,6 +31,8 @@ from .runtime import (
 from .generator import (
     _ensure_expected_ga4_property,
     _fill_text_run,
+    _ga4_property_token,
+    _ga4_url,
     _goto_ga4_section,
     _launch_persistent_context,
     _replace_image_in_slide,
@@ -64,7 +66,7 @@ GA4_PROPERTIES_2026: dict[str, str] = {
 }
 
 TEMPLATES_2026: dict[str, str] = {
-    "econet":       "new/Econet February Website Report - Copy.pptx",
+    "econet":       "new/Econet March Website Report.pptx",
     "econet_ai":    "new/Econet AI March Website Report.pptx",
     "infraco":      "new/Econet Infraco March Website Report.pptx",
     "ecocash":      "new/EcoCash March Website Report.pptx",
@@ -673,7 +675,7 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
             gsc_page.screenshot(path=str(path), clip=clip)
         else:
             # Fallback: screenshot just the top portion of the viewport
-            gsc_page.screenshot(path=str(path), clip={"x": 0, "y": 150, "width": 1400, "height": 550})
+            gsc_page.screenshot(path=str(path), clip={"x": 0, "y": 150, "width": 1920, "height": 550})
 
         screenshots["search_screenshot"] = path
     except Exception:
@@ -1173,6 +1175,514 @@ def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
         _replace_image_in_slide(slide, screenshots["search_screenshot"], shape_name="Picture 10")
 
 
+def _prev_month_date_range(start_date: str) -> tuple[str, str]:
+    """Return (prev_start, prev_end) strings given a start_date like 'Mar 1, 2026'."""
+    from datetime import datetime, timedelta
+    dt = datetime.strptime(start_date, "%b %d, %Y")
+    first_of_current = dt.replace(day=1)
+    last_of_prev = first_of_current - timedelta(days=1)
+    first_of_prev = last_of_prev.replace(day=1)
+    return first_of_prev.strftime("%b %-d, %Y"), last_of_prev.strftime("%b %-d, %Y")
+
+
+def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str):
+    """Scrape previous month GA4 home metrics. Returns (prev_home_metrics, page) — page stays open for reuse."""
+    prev_home_metrics: dict = {}
+    page = context.new_page()
+    try:
+        prev_start, prev_end = _prev_month_date_range(start_date)
+        page.bring_to_front()
+        # Navigate directly to the property home URL — avoids needing the search bar
+        home_url = _ga4_url(report_name, "/home")
+        try:
+            page.goto(home_url, wait_until="domcontentloaded", timeout=30000)
+        except Exception:
+            pass
+        page.wait_for_timeout(3000)
+        # Confirm we're on the right property, retry with search if not
+        if _ga4_property_token(report_name) not in page.url:
+            page = _switch_ga4_property_via_search(page, report_name)
+        page = _goto_ga4_section(page, report_name, "/home")
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(1000)
+        except Exception:
+            pass
+        # Wait for the home page metrics to load before interacting with the date picker
+        try:
+            page.wait_for_selector(".metric-container", timeout=15000)
+        except Exception:
+            pass
+        _set_date_range(page, prev_start, prev_end)
+        prev_home_metrics = _scrape_home_metrics(page)
+    except Exception as e:
+        logger.warning("[2026] Previous month metrics scrape failed: %s", e)
+    return prev_home_metrics, page
+
+
+def _scrape_previous_month_metrics(
+    report_name: str,
+    start_date: str,
+    end_date: str,
+) -> dict:
+    """Scrape GA4 home metrics for the previous month. Opens its own browser session."""
+    prev_home_metrics: dict = {}
+    with sync_playwright() as p:
+        context = _launch_persistent_context(p, headless=False)
+        try:
+            prev_home_metrics = _scrape_prev_metrics_with_context(context, report_name, start_date)
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+    return prev_home_metrics
+
+
+def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date: str, existing_page=None) -> list[dict]:
+    """Navigate GA4 Pages and screens report, switch dimension to page path, return top 5 with title + path.
+
+    Pass existing_page to reuse an already-navigated GA4 page (avoids a second property search).
+    """
+    import re as _re
+
+    top5: list[dict] = []
+
+    try:
+        def _goto_snapshot_and_set_dates(pg):
+            """Navigate from GA4 home → snapshot → set date range. Inline to avoid _set_date_range combobox timing issues."""
+            pg.get_by_text("View reports snapshot").click()
+            pg.wait_for_timeout(3000)
+            _ensure_expected_ga4_property(pg, report_name)
+            snapshot_date_btn = pg.get_by_role("combobox", name="Open date range picker")
+            snapshot_date_btn.wait_for(state="visible", timeout=15000)
+            snapshot_date_btn.click()
+            pg.wait_for_timeout(1000)
+            pg.get_by_role("menuitem").filter(has_text="Custom").click()
+            pg.wait_for_timeout(1000)
+            start_input = pg.get_by_label("Start date")
+            start_input.wait_for(state="visible", timeout=10000)
+            start_input.click()
+            start_input.select_text()
+            start_input.fill(start_date)
+            pg.keyboard.press("Tab")
+            pg.wait_for_timeout(500)
+            end_input = pg.get_by_label("End date")
+            end_input.click()
+            end_input.select_text()
+            end_input.fill(end_date)
+            pg.keyboard.press("Tab")
+            pg.wait_for_timeout(500)
+            pg.get_by_role("button", name="Apply").click()
+            pg.wait_for_timeout(3000)
+
+        if existing_page is not None:
+            # Already on GA4 with correct property — go to home, click snapshot, set dates, click pages and screens
+            page = existing_page
+            page.bring_to_front()
+            page = _goto_ga4_section(page, report_name, "/home")
+            page.wait_for_timeout(2000)
+            _goto_snapshot_and_set_dates(page)
+            page.get_by_role("button", name="View pages and screens", exact=True).click()
+            page.wait_for_timeout(4000)
+        else:
+            page = context.new_page()
+            page.bring_to_front()
+            page = _switch_ga4_property_via_search(page, report_name)
+            page = _goto_ga4_section(page, report_name, "/home")
+            page.wait_for_timeout(2000)
+            _goto_snapshot_and_set_dates(page)
+            page.get_by_role("button", name="View pages and screens", exact=True).click()
+
+        page.wait_for_timeout(4000)
+        _ensure_expected_ga4_property(page, report_name)
+        page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+
+        # --- Scrape page titles first (default view) ---
+        body_titles = page.locator("body").inner_text()
+        titles: list[str] = []
+        for line in body_titles.splitlines():
+            m = _re.match(
+                r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t",
+                line,
+            )
+            if m and len(titles) < 5:
+                titles.append(m.group(1).strip())
+
+        # --- Dump table header HTML to file for selector discovery ---
+        try:
+            import pathlib as _pl
+            _header_html = page.locator("thead").first.inner_html()
+            _pl.Path("artifacts/ga4_thead_debug.html").write_text(_header_html, encoding="utf-8")
+            logger.info("[2026] Dumped GA4 thead HTML → artifacts/ga4_thead_debug.html")
+        except Exception:
+            pass
+
+        # --- Switch dimension to "Page path and screen class" to get real URL paths ---
+        # GA4 uses data-guidedhelpid="table-dimension-picker" on the button in the primary column header
+        switched = False
+        try:
+            # The primary dimension column has two "table-dimension-picker" buttons —
+            # the first one is the dimension selector (second is the secondary dimension "+")
+            dim_btn = page.locator(
+                "th.cdk-column-ROW_HEADER-unifiedScreenClass-primaryDimensionColumn "
+                "button[data-guidedhelpid='table-dimension-picker']"
+            ).first
+            dim_btn.wait_for(state="visible", timeout=8000)
+            dim_btn.click()
+            page.wait_for_timeout(1500)
+            # Menu opens — try multiple selectors since GA4 mat-menu items may not surface as role=menuitem
+            _clicked_dim = False
+            for _sel in [
+                lambda: page.get_by_role("menuitem").filter(has_text="Page path").first,
+                lambda: page.locator("button.mat-mdc-menu-item").filter(has_text="Page path").first,
+                lambda: page.locator("[role='menuitem']").filter(has_text="Page path").first,
+                lambda: page.locator("mat-option, .mat-mdc-option").filter(has_text="Page path").first,
+                lambda: page.get_by_text("Page path and screen class").first,
+            ]:
+                try:
+                    el = _sel()
+                    el.wait_for(state="visible", timeout=5000)
+                    el.click()
+                    _clicked_dim = True
+                    break
+                except Exception:
+                    continue
+            if not _clicked_dim:
+                raise RuntimeError("Could not find 'Page path' menu item after clicking dimension picker")
+            page.wait_for_timeout(3000)
+            page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+            switched = True
+        except Exception as e:
+            logger.warning("[2026] Could not switch GA4 dimension to page path: %s", e)
+
+        body_paths = page.locator("body").inner_text()
+        paths: list[tuple[str, int]] = []
+        for line in body_paths.splitlines():
+            m = _re.match(
+                r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t",
+                line,
+            )
+            if m and len(paths) < 5:
+                paths.append((m.group(1).strip(), int(m.group(2).replace(",", ""))))
+
+        # Zip titles + paths by row index
+        for i, (path, views) in enumerate(paths):
+            title = titles[i] if i < len(titles) else path
+            top5.append({"title": title, "path": path, "views": views})
+
+    except Exception as e:
+        logger.warning("[2026] GA4 page paths scrape failed: %s", e)
+
+    return top5
+
+
+def _google_search_url(title: str, base_url: str) -> str | None:
+    """Use DuckDuckGo search (site: query) to find the real URL for a given page title.
+
+    Verifies the result by checking that the DDG result title contains the meaningful keyword.
+    Falls back through up to 3 results before giving up.
+    """
+    try:
+        import time as _time
+        from ddgs import DDGS
+        import urllib.parse as _up
+
+        domain = _up.urlparse(base_url).netloc
+        # Strip brand name from either end:
+        # "Devices - Econet Wireless Zimbabwe" → "Devices"
+        # "Econet Wireless Zimbabwe - Contact Us" → "Contact Us"
+        parts = [p.strip() for p in title.split(" - ")]
+        domain_root = domain.split(".")[1] if domain.count(".") >= 1 else domain
+        meaningful = [p for p in parts if domain_root.lower() not in p.lower()]
+        short_title = meaningful[0] if meaningful else parts[0]
+
+        query = f"site:{domain} {short_title}"
+        _time.sleep(1)
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=5))
+
+        for r in results:
+            result_title = r.get("title", "")
+            result_url = r.get("href", "")
+            if not result_url:
+                continue
+            # Must be on the same domain
+            if domain not in result_url:
+                continue
+            # Accept if the result title contains our keyword (case-insensitive)
+            if short_title.lower() in result_title.lower():
+                return result_url
+
+        # Second pass — domain match only, ignore title
+        for r in results:
+            result_url = r.get("href", "")
+            if result_url and domain in result_url and result_url.rstrip("/") != base_url.rstrip("/"):
+                return result_url
+
+    except Exception as e:
+        logger.warning("[2026] DDG search for title %r failed: %s", title, e)
+    return None
+
+
+def _audit_page_ctas(page, base_url: str) -> list[dict]:
+    """Click primary CTA buttons on the current page and verify they lead somewhere valid.
+
+    Returns a list of {label, href, resolved_url, status, broken} dicts.
+    Only tests buttons/links that look like CTAs — ignores nav, footer, social icons.
+    """
+    import urllib.parse as _up
+
+    results = []
+    origin = _up.urlparse(base_url).scheme + "://" + _up.urlparse(base_url).netloc
+
+    # Collect candidate CTA anchors: prominent buttons, "a" tags with button-like text
+    cta_keywords = ["buy", "shop", "get", "start", "activate", "download", "contact",
+                    "learn", "explore", "order", "sign", "register", "apply", "more"]
+    try:
+        # Grab all visible <a> and <button> elements
+        elements = page.locator("a[href], button").all()
+        seen_hrefs: set = set()
+
+        for el in elements[:40]:  # cap at 40 to avoid nav spam
+            try:
+                if not el.is_visible():
+                    continue
+                label = (el.inner_text() or "").strip().lower()
+                if not label or len(label) > 60:
+                    continue
+                if not any(k in label for k in cta_keywords):
+                    continue
+
+                href = el.get_attribute("href") or ""
+                # Skip anchors, mailto, tel, javascript
+                if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                    continue
+                # Resolve relative URLs
+                resolved = href if href.startswith("http") else _up.urljoin(origin + "/", href)
+                if resolved in seen_hrefs:
+                    continue
+                seen_hrefs.add(resolved)
+
+                # Open in a new tab to test without leaving the page
+                new_tab = page.context.new_page()
+                status = 0
+                final_url = resolved
+                broken = True
+                try:
+                    resp = new_tab.goto(resolved, wait_until="domcontentloaded", timeout=10000)
+                    status = resp.status if resp else 0
+                    final_url = new_tab.url
+                    broken = status >= 400 or status == 0
+                except Exception:
+                    broken = True
+                finally:
+                    new_tab.close()
+
+                results.append({
+                    "label": label,
+                    "href": href,
+                    "resolved_url": final_url,
+                    "status": status,
+                    "broken": broken,
+                })
+            except Exception:
+                continue
+    except Exception as e:
+        logger.warning("[2026] CTA audit failed: %s", e)
+
+    return results
+
+
+def _scrape_website_pages(
+    report_name: str,
+    start_date: str,
+    end_date: str,
+    _stage_callback=None,
+) -> tuple[dict, dict]:
+    """Navigate GA4 Pages report to get top 5 page titles, resolve real URLs via DDG search, then scrape content.
+
+    Returns (website_pages, prev_home_metrics) — both scraped in a single browser session.
+    """
+    def _stage(msg: str):
+        if _stage_callback:
+            _stage_callback(msg)
+        logger.info("[2026] Stage: %s", msg)
+    base_url = GSC_URLS.get(report_name, "")
+    if not base_url:
+        return {"top": []}, {}
+
+    result: dict = {"top": []}
+
+    with sync_playwright() as p:
+        context = _launch_persistent_context(p, headless=False)
+        try:
+            # Scrape previous month metrics — keep the page open and reuse it for page paths
+            _stage("Scraping previous month metrics...")
+            prev_home_metrics, ga4_page = _scrape_prev_metrics_with_context(context, report_name, start_date)
+
+            _stage("Scraping top pages from GA4...")
+            top5 = _scrape_ga4_page_paths(context, report_name, start_date, end_date, existing_page=ga4_page)
+
+            import urllib.parse as _up
+            domain_root = _up.urlparse(base_url).netloc.split(".")[1]
+
+            screenshots_dir = out_dir = Path("artifacts/screenshots/site_pages")
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+            site_page = context.new_page()
+            site_page.set_viewport_size({"width": 1440, "height": 900})
+            qr_codes: list[dict] = []
+
+            for row in top5:
+                title = row.get("title", "")
+                path = row.get("path", "")
+
+                # Homepage — all title parts are brand name, use base URL directly
+                all_parts_are_brand = all(
+                    domain_root.lower() in p.lower()
+                    for p in [p.strip() for p in title.split(" - ")]
+                )
+                if all_parts_are_brand:
+                    url = base_url
+                elif path.startswith("/"):
+                    # Dimension switch succeeded — path is a real URL path, use it directly
+                    url = base_url.rstrip("/") + path
+                else:
+                    # Dimension switch failed — path is a title, use DDG to resolve
+                    url = _google_search_url(title, base_url)
+                    if not url:
+                        url = base_url.rstrip("/") + f"/{path}"
+
+                # Skip if this URL was already visited (DDG returned duplicate)
+                already_visited = any(r["url"] == url for r in result["top"])
+                if already_visited:
+                    logger.warning("[2026] Duplicate URL %s for title %r — skipping", url, title)
+                    result["top"].append({"title": title, "url": url, "content": "", "views": row.get("views", 0), "status": 0, "screenshot": None})
+                    continue
+
+                status = 0
+                content = ""
+                screenshot_path = None
+                short_title = title.split(" - ")[0].strip()
+                _stage(f"Visiting {short_title}...")
+                try:
+                    response = site_page.goto(url, wait_until="domcontentloaded", timeout=20000)
+                    status = response.status if response else 0
+
+                    # Block custom fonts so screenshot never hangs waiting for them
+                    try:
+                        site_page.add_style_tag(content="@font-face { src: none !important; } * { font-family: Arial, sans-serif !important; }")
+                    except Exception:
+                        pass
+
+                    # Dismiss cookie consent banners before anything else
+                    for cookie_sel in [
+                        "button:has-text('Accept')", "button:has-text('Accept All')",
+                        "button:has-text('I Accept')", "button:has-text('OK')",
+                        "button:has-text('Got it')", "button:has-text('Allow')",
+                        "[id*='cookie'] button", "[class*='cookie'] button",
+                        "[id*='consent'] button", "[class*='consent'] button",
+                    ]:
+                        try:
+                            btn = site_page.locator(cookie_sel).first
+                            if btn.is_visible(timeout=1000):
+                                btn.click(timeout=1000)
+                                site_page.wait_for_timeout(500)
+                                break
+                        except Exception:
+                            continue
+
+                    # Wait for images to finish loading before scrolling/screenshotting
+                    site_page.wait_for_timeout(2000)
+                    try:
+                        site_page.wait_for_function(
+                            "() => [...document.images].every(img => img.complete)",
+                            timeout=8000,
+                        )
+                    except Exception:
+                        pass  # some images may still be lazy — proceed anyway
+
+                    # Scroll to trigger lazy-loaded content
+                    site_page.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+                    site_page.wait_for_timeout(1000)
+                    site_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    site_page.wait_for_timeout(1000)
+                    site_page.evaluate("window.scrollTo(0, 0)")
+                    site_page.wait_for_timeout(1000)
+
+                    # Wait again for any images triggered by scrolling
+                    try:
+                        site_page.wait_for_function(
+                            "() => [...document.images].every(img => img.complete)",
+                            timeout=5000,
+                        )
+                    except Exception:
+                        pass
+
+                    content = site_page.inner_text("body")
+                    content = " ".join(content.split())[:3000]
+                    # Full-page screenshot — inject CSS to block remote font loading which can hang
+                    safe_name = "".join(c if c.isalnum() else "_" for c in title)[:60]
+                    shot_path = screenshots_dir / f"{safe_name}.png"
+                    try:
+                        site_page.add_style_tag(content="@font-face { font-family: any; src: none !important; }")
+                    except Exception:
+                        pass
+                    try:
+                        site_page.screenshot(path=str(shot_path), full_page=True, timeout=30000, animations="disabled")
+                        screenshot_path = str(shot_path)
+                    except Exception as _se:
+                        logger.warning("[2026] Screenshot timed out for %s, falling back to viewport: %s", url, _se)
+                        try:
+                            site_page.screenshot(path=str(shot_path), full_page=False, timeout=15000, animations="disabled")
+                            screenshot_path = str(shot_path)
+                        except Exception:
+                            pass
+
+                    # --- QR code detection (only runs if screenshot exists) ---
+                    try:
+                        import cv2 as _cv2
+                        _img = _cv2.imread(str(shot_path))
+                        if _img is not None:
+                            _qr_data, _, _ = _cv2.QRCodeDetector().detectAndDecode(_img)
+                            if _qr_data:
+                                qr_codes.append({"url": url, "data": _qr_data})
+                                logger.info("[2026] QR code found on %s: %s", url, _qr_data)
+                    except Exception:
+                        pass
+
+                    # --- CTA button/link audit ---
+                    cta_results = _audit_page_ctas(site_page, base_url)
+                    if cta_results:
+                        result.setdefault("cta_audit", []).append({
+                            "page_url": url,
+                            "page_title": title,
+                            "ctas": cta_results,
+                        })
+                except Exception as e:
+                    logger.warning("[2026] Failed to load %s: %s", url, e)
+
+                result["top"].append({
+                    "title": title,
+                    "url": url,
+                    "content": content,
+                    "views": row.get("views", 0),
+                    "status": status,
+                    "screenshot": screenshot_path,
+                })
+        except Exception as e:
+            logger.warning("[2026] Website page scrape failed: %s", e)
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+    result["qr_codes"] = qr_codes
+    return result, prev_home_metrics
+
+
 def _generate_recommendations_2026(
     report_name: str,
     home_metrics: dict,
@@ -1180,6 +1690,8 @@ def _generate_recommendations_2026(
     pages_data: list[dict],
     countries_data: list[dict],
     date_range: str,
+    prev_home_metrics: dict | None = None,
+    website_pages: dict | None = None,
 ) -> list[dict]:
     """Use Gemini to generate 3 structured recommendations, each with a title + 3 bullet points."""
     load_runtime_environment()
@@ -1198,6 +1710,63 @@ def _generate_recommendations_2026(
     channels = snapshot_metrics.get("channels", {})
     channels_str = ", ".join(f"{k}: {v}" for k, v in list(channels.items())[:5]) if channels else "N/A"
 
+    # Month-on-month comparison section
+    mom_section = ""
+    if prev_home_metrics:
+        def _mom(label, key):
+            curr = home_metrics.get(key, "N/A")
+            prev = prev_home_metrics.get(key, "N/A")
+            return f"{label}: {prev} (prev) → {curr} (current)"
+        mom_section = (
+            "\nMonth-on-month comparison:\n"
+            + _mom("Active users", "Active users") + "\n"
+            + _mom("New users", "New users") + "\n"
+            + _mom("Avg engagement time", "Average engagement time per active user") + "\n"
+        )
+
+    # CTA audit findings
+    cta_section = ""
+    if website_pages and website_pages.get("cta_audit"):
+        lines = []
+        for page_audit in website_pages["cta_audit"]:
+            broken = [c for c in page_audit["ctas"] if c["broken"]]
+            working = [c for c in page_audit["ctas"] if not c["broken"]]
+            if broken:
+                lines.append(f"  {page_audit['page_title']} ({page_audit['page_url']}):")
+                for c in broken:
+                    lines.append(f"    BROKEN CTA: '{c['label']}' → {c['resolved_url']} (status {c['status']})")
+            if working:
+                lines.append(f"  {page_audit['page_title']} — working CTAs: {', '.join(c['label'] for c in working[:5])}")
+        if lines:
+            cta_section = "\nCTA button audit (clicked and verified on live pages):\n" + "\n".join(lines) + "\n"
+
+    # QR code findings
+    qr_section = ""
+    if website_pages and website_pages.get("qr_codes"):
+        qr_lines = "\n".join(
+            f"- {q['url']}: QR encodes {q['data']!r}"
+            for q in website_pages["qr_codes"]
+        )
+        qr_section = f"\nFunctional QR codes detected on the live site:\n{qr_lines}\n"
+
+    # Website page content section — only include pages with real, unique content
+    pages_section = ""
+    if website_pages:
+        seen_urls: set = set()
+        valid_pages = []
+        for p in website_pages.get("top", []):
+            url = p.get("url", "")
+            content = p.get("content", "")
+            if content and url and url not in seen_urls:
+                seen_urls.add(url)
+                valid_pages.append(p)
+        if valid_pages:
+            top_content = "\n".join(
+                f"- {p['title']} ({p['url']}): {p['content'][:600]}"
+                for p in valid_pages
+            )
+            pages_section = "\nTop performing pages (actual site content scraped from live site):\n" + top_content + "\n"
+
     prompt = (
         f"You are a digital analytics expert writing a monthly website performance report for {brand}.\n\n"
         f"Period: {date_range}\n"
@@ -1205,37 +1774,84 @@ def _generate_recommendations_2026(
         f"New users: {home_metrics.get('New users', 'N/A')}\n"
         f"Avg engagement time: {home_metrics.get('Average engagement time per active user', 'N/A')}\n"
         f"Top acquisition channels: {channels_str}\n"
-        f"Top pages: {top_pages}\n"
-        f"Top countries: {top_countries}\n\n"
-        "Write exactly 3 actionable recommendations to improve website performance.\n"
-        "For each recommendation output:\n"
-        "TITLE: <short action-oriented title (4-6 words)>\n"
-        "- <bullet point 1>\n"
-        "- <bullet point 2>\n"
-        "- <bullet point 3>\n"
+        f"Top pages by views: {top_pages}\n"
+        f"Top countries: {top_countries}\n"
+        f"{mom_section}"
+        f"{cta_section}"
+        f"{qr_section}"
+        f"{pages_section}\n"
+        "Screenshots of the top performing pages are attached. Use them to identify UX, content, "
+        "and conversion issues visible on the actual pages. "
+        "Ignore any cookie consent banners visible in screenshots — these are browser artifacts. "
+        "Only flag missing images or broken elements if the CTA audit above explicitly confirms them as broken.\n\n"
+        "Write exactly 3 actionable recommendations. Each must follow this EXACT format with no deviations:\n\n"
+        "TITLE: <action-oriented title, 4-7 words>\n"
+        "BODY: <one sentence framing the recommendation>\n"
+        "- <specific action bullet 1>\n"
+        "- <specific action bullet 2>\n"
+        "- <specific action bullet 3>\n"
+        "- <specific action bullet 4>\n"
+        "- <specific action bullet 5>\n"
         "---\n"
-        "Use formal business English. No markdown bold, no em dashes. Be specific to the data above."
+        "TITLE: <action-oriented title, 4-7 words>\n"
+        "BODY: <one sentence framing the recommendation>\n"
+        "- <specific action bullet 1>\n"
+        "- <specific action bullet 2>\n"
+        "- <specific action bullet 3>\n"
+        "- <specific action bullet 4>\n"
+        "---\n"
+        "TITLE: <action-oriented title, 4-7 words>\n"
+        "BODY: <one sentence framing the recommendation>\n"
+        "- <specific action bullet 1>\n"
+        "- <specific action bullet 2>\n"
+        "- <specific action bullet 3>\n"
+        "---\n"
+        "Use formal business English. No markdown bold, no em dashes. "
+        "Be specific — reference actual page names, metrics, and visual observations from the screenshots."
     )
 
+    # Build multimodal contents — text prompt + screenshots of top pages
+    from google.genai import types as _gtypes
+    contents: list = [prompt]
+    if website_pages:
+        for pg in website_pages.get("top", []):
+            shot = pg.get("screenshot")
+            if shot and Path(shot).exists():
+                try:
+                    image_bytes = Path(shot).read_bytes()
+                    contents.append(_gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"))
+                    contents.append(f"[Screenshot of: {pg['title']} — {pg['url']}]")
+                except Exception:
+                    pass
+
     client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    resp = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
     text = resp.text.strip()
 
+    # Expected bullets per rec matches template: rec1=5, rec2=4, rec3=3
+    bullet_counts = [5, 4, 3]
+
     recs = []
-    for block in text.split("---"):
+    for i, block in enumerate(text.split("---")):
         block = block.strip()
         if not block:
             continue
         lines = [l.strip() for l in block.splitlines() if l.strip()]
         title = ""
+        body = ""
         bullets = []
         for line in lines:
             if line.upper().startswith("TITLE:"):
                 title = line[6:].strip()
+            elif line.upper().startswith("BODY:"):
+                body = line[5:].strip()
             elif line.startswith("-"):
                 bullets.append(line[1:].strip())
-        if title and bullets:
-            recs.append({"title": title, "bullets": bullets[:3]})
+        if title:
+            max_bullets = bullet_counts[i] if i < len(bullet_counts) else 3
+            # Pad with body sentence if not enough bullets
+            all_bullets = ([body] + bullets) if body else bullets
+            recs.append({"title": title, "body": body, "bullets": all_bullets[:max_bullets]})
         if len(recs) == 3:
             break
 
@@ -1251,10 +1867,13 @@ def _build_recommendations_slide(
     countries_data: list[dict],
     date_range: str,
     report_date: str,
+    prev_home_metrics: dict | None = None,
+    website_pages: dict | None = None,
 ) -> None:
     """Replace recommendations on slide 7 (object 7) with Gemini-generated content."""
     recs = _generate_recommendations_2026(
-        report_name, home_metrics, snapshot_metrics, pages_data, countries_data, date_range
+        report_name, home_metrics, snapshot_metrics, pages_data, countries_data, date_range,
+        prev_home_metrics=prev_home_metrics, website_pages=website_pages,
     )
     if not recs:
         return
@@ -1269,32 +1888,41 @@ def _build_recommendations_slide(
             if content_paras:
                 _fill_text_run(content_paras[0], "Three Key Initiatives to Enhance Performance")
 
-        # object 7 — main content: replace paragraphs starting with "1.", "2.", "3."
-        # Each rec title replaces the numbered heading; bullets replace the sub-paragraphs
+        # object 7 — main content block
+        # Template structure (para indices):
+        #   [0]       bold, no number  → rec 1 title
+        #   [1..5]    body+bullets     → rec 1 (5 lines)
+        #   [6]       bold, "2. ..."   → rec 2 title
+        #   [7..10]   body+bullets     → rec 2 (4 lines)
+        #   [11]      bold, "3. ..."   → rec 3 title
+        #   [12..14]  body+bullets     → rec 3 (3 lines)
         elif shape.name == "object 7":
-            all_paras = shape.text_frame.paragraphs
-            rec_idx = 0  # which recommendation we're filling
-            bullet_idx = 0  # which bullet within that rec
-
-            for para in all_paras:
-                full_text = "".join(r.text for r in para.runs).strip()
-                if not full_text:
+            paras = shape.text_frame.paragraphs
+            # Map: (para_index, rec_index, line_role)
+            # line_role: "title" | "bullet_N"
+            layout = [
+                (0,  0, "title"),
+                (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
+                (4,  0, "bullet_3"), (5,  0, "bullet_4"),
+                (6,  1, "title"),
+                (7,  1, "bullet_0"), (8,  1, "bullet_1"), (9,  1, "bullet_2"),
+                (10, 1, "bullet_3"),
+                (11, 2, "title"),
+                (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
+            ]
+            for para_idx, rec_idx, role in layout:
+                if para_idx >= len(paras) or rec_idx >= len(recs):
                     continue
-
-                # Numbered heading line — start a new recommendation
-                if re.match(r"^\d+\.", full_text) and rec_idx < len(recs):
-                    _fill_text_run(para, f"{rec_idx + 1}. {recs[rec_idx]['title']}")
-                    bullet_idx = 0
-                    continue
-
-                # Bullet / sub-paragraph under the current recommendation
-                if rec_idx < len(recs) and bullet_idx < len(recs[rec_idx]["bullets"]):
-                    _fill_text_run(para, recs[rec_idx]["bullets"][bullet_idx])
-                    bullet_idx += 1
-                    # Move to next rec when bullets exhausted
-                    if bullet_idx >= len(recs[rec_idx]["bullets"]):
-                        rec_idx += 1
-                        bullet_idx = 0
+                rec = recs[rec_idx]
+                para = paras[para_idx]
+                if role == "title":
+                    prefix = "" if rec_idx == 0 else f"{rec_idx + 1}. "
+                    _fill_text_run(para, f"{prefix}{rec['title']}")
+                else:
+                    bullet_n = int(role.split("_")[1])
+                    bullets = rec.get("bullets", [])
+                    if bullet_n < len(bullets):
+                        _fill_text_run(para, bullets[bullet_n])
 
 
 # ---------------------------------------------------------------------------
@@ -1322,6 +1950,10 @@ def generate_report_2026(
         report_name, start_date, end_date, _stage_callback=_stage_callback
     )
 
+    # Step 1b: Scrape previous month metrics + visit client website pages in one browser session
+    _stage("Scraping previous month metrics + client website pages...")
+    website_pages, prev_home_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
+
     # Step 2: Load template
     template_path = TEMPLATES_DIR / TEMPLATES_2026[report_name]
     prs = Presentation(str(template_path))
@@ -1348,6 +1980,8 @@ def generate_report_2026(
         prs.slides[rec_slide_idx],
         report_name, home_metrics, snapshot_metrics,
         pages_data, countries_data, date_range, report_date,
+        prev_home_metrics=prev_home_metrics,
+        website_pages=website_pages,
     )
 
     # Step 4: Save

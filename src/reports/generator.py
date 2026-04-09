@@ -104,7 +104,19 @@ def _open_analytics_root(page) -> None:
         page.goto("https://analytics.google.com/analytics/web/", wait_until="domcontentloaded", timeout=30000)
     except Exception:
         page.goto("https://analytics.google.com/analytics/web/", wait_until="load", timeout=45000)
-    page.wait_for_timeout(3000)
+    # Wait for the search bar to actually appear instead of a fixed sleep
+    for sel in [
+        lambda: page.get_by_role("searchbox").first,
+        lambda: page.get_by_role("textbox", name=re.compile("search", re.I)).first,
+        lambda: page.locator('input[aria-label*="Search"], input[placeholder*="Search"]').first,
+    ]:
+        try:
+            sel().wait_for(state="visible", timeout=12000)
+            return
+        except Exception:
+            continue
+    # fallback — give GA4 more time if nothing found yet
+    page.wait_for_timeout(5000)
 
 
 def _click_first_visible(locator) -> bool:
@@ -295,7 +307,6 @@ def _launch_persistent_context(playwright, headless: bool = False):
     stealth_args = [
         f"--profile-directory={chrome_profile_directory}",
         "--disable-blink-features=AutomationControlled",
-        "--start-maximized",
     ]
     try:
         return playwright.chromium.launch_persistent_context(
@@ -304,7 +315,7 @@ def _launch_persistent_context(playwright, headless: bool = False):
             headless=headless,
             args=stealth_args,
             ignore_default_args=["--enable-automation"],
-            no_viewport=True,
+            viewport={"width": 1920, "height": 1080},
         )
     except Exception:
         return playwright.chromium.launch_persistent_context(
@@ -312,12 +323,33 @@ def _launch_persistent_context(playwright, headless: bool = False):
             headless=headless,
             args=stealth_args,
             ignore_default_args=["--enable-automation"],
-            no_viewport=True,
+            viewport={"width": 1920, "height": 1080},
         )
 
 
 def _set_date_range(page, start: str, end: str) -> None:
-    page.get_by_role("combobox", name="Open date range picker").first.click()
+    # Dismiss any GA4 modals/tooltips (welcome dialogs, what's new, guided tours)
+    for dismiss_sel in [
+        "button[aria-label='Close']",
+        "button[aria-label='Dismiss']",
+        "button:has-text('Got it')",
+        "button:has-text('Dismiss')",
+        "button:has-text('Close')",
+        "button:has-text('No thanks')",
+        "[data-guidedhelpid='agi-dismiss-button']",
+        "gds-guide-button[dismiss]",
+    ]:
+        try:
+            btn = page.locator(dismiss_sel).first
+            if btn.is_visible(timeout=1500):
+                btn.click()
+                page.wait_for_timeout(500)
+        except Exception:
+            continue
+
+    date_picker = page.get_by_role("combobox", name="Open date range picker").first
+    date_picker.wait_for(state="visible", timeout=15000)
+    date_picker.click()
     page.wait_for_timeout(1000)
     page.get_by_role("menuitem").filter(has_text="Custom").click()
     page.wait_for_timeout(1000)
