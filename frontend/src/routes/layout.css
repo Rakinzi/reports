@@ -119,3 +119,26 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ── View Transitions ── */
+@keyframes vt-fade-slide-out {
+  to { opacity: 0; transform: translateY(-4px); }
+}
+@keyframes vt-fade-slide-in {
+  from { opacity: 0; transform: translateY(4px); }
+}
+
+::view-transition-old(root) {
+  animation: 150ms ease-out both vt-fade-slide-out;
+}
+::view-transition-new(root) {
+  animation: 180ms ease-out both vt-fade-slide-in;
+}
+
+/* ── Theme: default to dark ── */
+html {
+  color-scheme: dark;
+}
+html.light {
+  color-scheme: light;
+}

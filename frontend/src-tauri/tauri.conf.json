@@ -4,7 +4,6 @@
   "version": "0.1.2",
   "identifier": "com.rakinzisilver.reports",
   "build": {
-    "beforeDevCommand": "npm run desktop:build-sidecar && npm run dev",
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../build"
@@ -25,10 +24,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": [
-      "icons/icon.png"
-    ],
     "externalBin": [
       "binaries/reports-api"
     ]

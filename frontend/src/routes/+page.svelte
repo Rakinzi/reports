@@ -15,6 +15,10 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
+	import BootScreen from '$lib/components/BootScreen.svelte';
+	import StatusOrb from '$lib/components/StatusOrb.svelte';
+	import GeneratingPulse from '$lib/components/GeneratingPulse.svelte';
+	import SpinnerArc from '$lib/components/SpinnerArc.svelte';
 	import {
 		Dialog,
 		DialogContent,
@@ -259,10 +263,7 @@
 	<div class="flex-1 space-y-6 overflow-auto p-8">
 		{#if booting}
 			<div class="flex h-full min-h-[40vh] items-center justify-center">
-				<div class="flex items-center gap-3 rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-4 text-sm text-zinc-300">
-					<Loader2 class="h-4 w-4 animate-spin" />
-					Starting local backend...
-				</div>
+				<BootScreen message="Starting local backend..." />
 			</div>
 		{:else}
 			{#if !settings.configured}
@@ -332,9 +333,13 @@
 										<TableCell class="text-sm text-zinc-400">{report.date_range}</TableCell>
 										<TableCell class="text-sm text-zinc-400">{report.report_date}</TableCell>
 										<TableCell>
-											<Badge variant={statusBadge(report.status)} class="text-xs capitalize">
-												{report.status}
-											</Badge>
+											<div class="flex items-center gap-2">
+												<StatusOrb
+													status={report.status === 'pending' ? 'running' : report.status as 'idle' | 'completed' | 'failed'}
+													size={8}
+												/>
+												<span class="text-xs capitalize text-zinc-400">{report.status}</span>
+											</div>
 										</TableCell>
 										<TableCell class="text-xs text-zinc-500">{formatDate(report.created_at)}</TableCell>
 										<TableCell class="text-right">
@@ -359,11 +364,8 @@
 													</Button>
 												</div>
 											{:else if report.status === 'pending'}
-												<div class="flex items-center justify-end gap-2">
-													<div class="flex items-center gap-1.5 text-xs text-zinc-400">
-														<Loader2 class="h-3 w-3 animate-spin" />
-														{report.stage ?? 'Processing...'}
-													</div>
+												<div class="flex items-center justify-end gap-3">
+													<GeneratingPulse stage={report.stage ?? 'Processing...'} />
 													<Button
 														size="sm"
 														variant="ghost"
@@ -470,7 +472,7 @@
 					disabled={generating}
 				>
 					{#if generating}
-						<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+						<span class="mr-2 inline-flex"><SpinnerArc size={16} stroke={2} color="#18181b" /></span>
 						Generating...
 					{:else}
 						Generate

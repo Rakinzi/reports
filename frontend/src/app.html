@@ -4,6 +4,21 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- Blocking theme script: apply saved theme before first paint to prevent flash -->
+		<script>
+			(function () {
+				var t = 'dark';
+				try { t = localStorage.getItem('theme') || 'dark'; } catch (e) {}
+				var h = document.documentElement;
+				if (t === 'light') {
+					h.classList.add('light');
+					h.classList.remove('dark');
+				} else {
+					h.classList.add('dark');
+					h.classList.remove('light');
+				}
+			})();
+		</script>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">
