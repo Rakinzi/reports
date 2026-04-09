@@ -17,6 +17,8 @@
 		"tauri:dev": "tauri dev",
 		"tauri:clean": "rm -rf src-tauri/target/release/bundle src-tauri/target/release/reports-desktop",
 		"tauri:build": "tauri build",
+		"tauri:build:mac": "bun run tauri:clean && tauri build --config src-tauri/tauri.macos.conf.json",
+		"tauri:build:win": "bun run tauri:clean && tauri build --config src-tauri/tauri.windows.conf.json",
 		"tauri:build:dmg": "bun run tauri:clean && bun run tauri:build"
 	},
 	"type": "module",
