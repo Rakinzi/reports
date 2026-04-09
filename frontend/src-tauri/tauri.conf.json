@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.rakinzisilver.reports",
   "build": {
-    "beforeDevCommand": "npm run desktop:build-sidecar && npm run dev",
+    "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../build"

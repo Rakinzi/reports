@@ -63,7 +63,7 @@ def build_sidecar(target_triple: str) -> Path:
             str(ROOT),
             "--add-data",
             f"{ROOT / 'src' / 'reports' / 'report-templates'}{add_data_sep}src/reports/report-templates",
-            "--collect-data",
+            "--collect-all",
             "matplotlib",
             "--collect-data",
             "pandas",
