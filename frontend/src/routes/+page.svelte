@@ -103,6 +103,15 @@
 	const endDate = $derived(toGA4Date(endDateRaw));
 	const reportDate = $derived(toReportDate(reportDateRaw));
 
+	const today = new Date().toISOString().slice(0, 10);
+	const dateValidationError = $derived((() => {
+		if (!startDateRaw || !endDateRaw) return '';
+		if (startDateRaw > today) return 'Start date cannot be in the future.';
+		if (endDateRaw > today) return 'End date cannot be in the future.';
+		if (startDateRaw > endDateRaw) return 'Start date must be before end date.';
+		return '';
+	})());
+
 	const stats = $derived({
 		total: reports.length,
 		completed: reports.filter((r) => r.status === 'completed').length,
@@ -156,6 +165,26 @@
 		}
 	}
 
+	function retryReport(report: Report) {
+		// Parse "1 March 2026 - 30 April 2026" back to YYYY-MM-DD for the date inputs
+		const parts = report.date_range.split(' - ');
+		if (parts.length === 2) {
+			const parseToRaw = (s: string) => {
+				const d = new Date(s + ' 00:00:00');
+				if (isNaN(d.getTime())) return '';
+				return d.toISOString().slice(0, 10);
+			};
+			startDateRaw = parseToRaw(parts[0].trim());
+			endDateRaw = parseToRaw(parts[1].trim());
+		}
+		// Parse "03 March 2026" back to YYYY-MM-DD
+		const rd = new Date(report.report_date + ' 00:00:00');
+		reportDateRaw = isNaN(rd.getTime()) ? '' : rd.toISOString().slice(0, 10);
+		reportName = report.report_name as typeof reportName;
+		generateError = '';
+		generateOpen = true;
+	}
+
 	async function downloadReport(report: Report) {
 		const suggestedName =
 			report.output_path?.split(/[\\/]/).pop() ??
@@ -193,6 +222,7 @@
 
 	async function handleGenerate(event: SubmitEvent) {
 		event.preventDefault();
+		if (dateValidationError) return;
 		generating = true;
 		generateError = '';
 
@@ -376,7 +406,16 @@
 													</Button>
 												</div>
 											{:else if report.status === 'failed'}
-												<span class="text-xs text-red-400" title={report.error ?? ''}>Failed</span>
+												<Button
+													size="sm"
+													variant="ghost"
+													class="text-red-400 hover:bg-red-500/10 hover:text-red-300"
+													title={report.error ?? 'Report failed'}
+													onclick={() => retryReport(report)}
+												>
+													<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
+													Retry
+												</Button>
 											{/if}
 										</TableCell>
 									</TableRow>
@@ -439,7 +478,15 @@
 				</div>
 			</div>
 
-			{#if dateRange}
+			{#if dateValidationError}
+				<div class="date-error-toast" role="alert" aria-live="assertive">
+					<span class="date-error-bar"></span>
+					<svg class="date-error-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+					</svg>
+					<span class="date-error-text">{dateValidationError}</span>
+				</div>
+			{:else if dateRange}
 				<p class="text-xs text-zinc-500">Date range: <span class="text-zinc-400">{dateRange}</span></p>
 			{/if}
 
@@ -469,7 +516,7 @@
 				<Button
 					type="submit"
 					class="bg-zinc-100 font-semibold text-zinc-900 hover:bg-zinc-200"
-					disabled={generating}
+					disabled={generating || !!dateValidationError}
 				>
 					{#if generating}
 						<span class="mr-2 inline-flex"><SpinnerArc size={16} stroke={2} color="#18181b" /></span>

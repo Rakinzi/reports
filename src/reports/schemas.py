@@ -1,5 +1,8 @@
-from pydantic import BaseModel
+import datetime as dt
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Literal
+
+_GA4_DATE_FMT = "%b %d, %Y"  # e.g. "Feb 1, 2026"
 
 
 ReportName = Literal[
@@ -20,6 +23,25 @@ class GenerateReportRequest(BaseModel):
     report_date: str         # e.g. "03 March 2026"
     start_date: str          # GA4 picker format e.g. "Feb 1, 2026"
     end_date: str            # GA4 picker format e.g. "Feb 28, 2026"
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def dates_must_not_exceed_today(cls, v: str, info) -> str:
+        try:
+            parsed = dt.datetime.strptime(v, _GA4_DATE_FMT).date()
+        except ValueError:
+            raise ValueError(f"{info.field_name} must be in format 'Mon D, YYYY' (e.g. 'Feb 1, 2026')")
+        if parsed > dt.date.today():
+            raise ValueError(f"{info.field_name} '{v}' cannot be in the future (today is {dt.date.today()})")
+        return v
+
+    @model_validator(mode="after")
+    def start_must_be_before_end(self) -> "GenerateReportRequest":
+        start = dt.datetime.strptime(self.start_date, _GA4_DATE_FMT).date()
+        end = dt.datetime.strptime(self.end_date, _GA4_DATE_FMT).date()
+        if start > end:
+            raise ValueError(f"start_date '{self.start_date}' must not be after end_date '{self.end_date}'")
+        return self
 
 
 class GenerateReportResponse(BaseModel):

@@ -26,9 +26,16 @@ Prerequisites:
 
 1. Install Python dependencies: `uv sync`
 2. Install frontend dependencies: `cd frontend && bun install`
-3. Build the Python sidecar: `cd frontend && bun run desktop:build-sidecar`
+3. Build commands now rebuild the Python sidecar automatically before packaging.
 
 The sidecar build script writes the platform-specific executable into `frontend/src-tauri/binaries/` using the target-triple suffix required by Tauri.
+
+If you want to refresh the sidecar without creating an installer, run:
+
+```sh
+cd frontend
+bun run desktop:build-sidecar
+```
 
 ### macOS (`.app` + `.dmg`)
 

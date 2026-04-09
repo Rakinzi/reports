@@ -13,7 +13,7 @@ from .db import (
     update_report_slides_dir, update_report_edits, update_report_stage,
 )
 from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
-from .runtime import get_runtime_status, load_runtime_environment, save_settings
+from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings
 from .schemas import AppSettingsUpdate, GenerateReportRequest
 
 _executor = ThreadPoolExecutor(max_workers=1)
@@ -159,6 +159,22 @@ def get_report_by_id(report_id: int):
     return JSONResponse(report)
 
 
+def _resolve_report_path(stored: str) -> Path:
+    """Resolve a stored output_path to an absolute path.
+
+    New records are always absolute. Old records may have been written with a relative
+    path (e.g. 'artifacts/output/foo.pptx'). Try resolving those against the project
+    root (parent of app_data_dir) so dev-mode old records still work.
+    """
+    p = Path(stored)
+    if p.is_absolute():
+        return p
+    candidate = get_app_data_dir().parent / p
+    if candidate.exists():
+        return candidate
+    return Path.cwd() / p
+
+
 @app.get("/reports/{report_id}/download")
 def download_report(report_id: int):
     report = get_report(report_id)
@@ -166,7 +182,7 @@ def download_report(report_id: int):
         raise HTTPException(status_code=404, detail="Report not found")
     if report["status"] != "completed" or not report["output_path"]:
         raise HTTPException(status_code=400, detail="Report is not ready for download")
-    output_path = Path(report["output_path"])
+    output_path = _resolve_report_path(report["output_path"])
     if not output_path.exists():
         raise HTTPException(status_code=404, detail="Report file not found on disk")
     return FileResponse(
@@ -185,7 +201,7 @@ def get_report_slides(report_id: int):
     if report["status"] != "completed" or not report["output_path"]:
         raise HTTPException(status_code=400, detail="Report is not ready")
 
-    output_path = _Path(report["output_path"])
+    output_path = _resolve_report_path(report["output_path"])
     if not output_path.exists():
         raise HTTPException(status_code=404, detail="Report file not found on disk")
 
@@ -262,7 +278,7 @@ def apply_report_edits(report_id: int, body: dict):
     if not edits:
         raise HTTPException(status_code=400, detail="No edits provided")
 
-    original_path = _Path(report["output_path"])
+    original_path = _resolve_report_path(report["output_path"])
     if not original_path.exists():
         raise HTTPException(status_code=404, detail="Original PPTX not found")
 

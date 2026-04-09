@@ -1016,9 +1016,17 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             elif any(kw in text.lower() for kw in ("average engagement time", "engagement benchmarks", "exiting immediately")):
                 _write_para_with_highlights(para, para4)
 
-    # Reuse the snapshot_card screenshot from slide 1 at Picture 18's original dimensions
+    # Reuse the snapshot_card screenshot using the actual picture name used by the template.
     if "snapshot_card" in screenshots:
-        _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name="Picture 18")
+        picture_names = {
+            shape.name
+            for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == 13
+        }
+        for candidate in ("Picture 18", "Picture 19"):
+            if candidate in picture_names:
+                _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=candidate)
+                break
 
 
 def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
@@ -1055,9 +1063,17 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
                     if i < len(narratives):
                         _write_para_with_highlights(para, narratives[i], bold_words=country_names)
 
-    # Use the captured countries table screenshot from GA4
+    # Use the captured countries table screenshot from GA4.
     if "countries_table" in screenshots:
-        _replace_image_in_slide(slide, screenshots["countries_table"], shape_name="Picture 10")
+        picture_names = {
+            shape.name
+            for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == 13
+        }
+        for candidate in ("Picture 10", "Picture 9"):
+            if candidate in picture_names:
+                _replace_image_in_slide(slide, screenshots["countries_table"], shape_name=candidate)
+                break
 
 
 def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0) -> None:
@@ -1087,7 +1103,15 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
                         _write_para_with_highlights(para, narratives[i], bold_words=page_names)
 
     if "pages_table" in screenshots:
-        _replace_image_in_slide(slide, screenshots["pages_table"], shape_name="Picture 13")
+        picture_names = {
+            shape.name
+            for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == 13
+        }
+        for candidate in ("Picture 11", "Picture 10", "Picture 13"):
+            if candidate in picture_names:
+                _replace_image_in_slide(slide, screenshots["pages_table"], shape_name=candidate)
+                break
 
 
 def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
@@ -1172,7 +1196,15 @@ def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
                     _write_para_with_highlights(para, narr)
 
     if "search_screenshot" in screenshots:
-        _replace_image_in_slide(slide, screenshots["search_screenshot"], shape_name="Picture 10")
+        picture_names = {
+            shape.name
+            for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == 13
+        }
+        for candidate in ("Picture 10", "Picture 8", "Picture 9", "Picture 20"):
+            if candidate in picture_names:
+                _replace_image_in_slide(slide, screenshots["search_screenshot"], shape_name=candidate)
+                break
 
 
 def _prev_month_date_range(start_date: str) -> tuple[str, str]:
@@ -1230,7 +1262,7 @@ def _scrape_previous_month_metrics(
     with sync_playwright() as p:
         context = _launch_persistent_context(p, headless=False)
         try:
-            prev_home_metrics = _scrape_prev_metrics_with_context(context, report_name, start_date)
+            prev_home_metrics, _page = _scrape_prev_metrics_with_context(context, report_name, start_date)
         finally:
             try:
                 context.close()
@@ -1254,7 +1286,7 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             pg.get_by_text("View reports snapshot").click()
             pg.wait_for_timeout(3000)
             _ensure_expected_ga4_property(pg, report_name)
-            snapshot_date_btn = pg.get_by_role("combobox", name="Open date range picker")
+            snapshot_date_btn = pg.get_by_role("combobox", name="Open date range picker").first
             snapshot_date_btn.wait_for(state="visible", timeout=15000)
             snapshot_date_btn.click()
             pg.wait_for_timeout(1000)
@@ -1513,16 +1545,21 @@ def _scrape_website_pages(
         return {"top": []}, {}
 
     result: dict = {"top": []}
+    prev_home_metrics: dict = {}
+
+    # Capture previous-month metrics in a separate browser session, then close it
+    # before starting the top-pages and live-site capture flow.
+    _stage("Scraping previous month metrics...")
+    try:
+        prev_home_metrics = _scrape_previous_month_metrics(report_name, start_date, end_date)
+    except Exception as e:
+        logger.warning("[2026] Previous month metrics scrape failed in separate session: %s", e)
 
     with sync_playwright() as p:
         context = _launch_persistent_context(p, headless=False)
         try:
-            # Scrape previous month metrics — keep the page open and reuse it for page paths
-            _stage("Scraping previous month metrics...")
-            prev_home_metrics, ga4_page = _scrape_prev_metrics_with_context(context, report_name, start_date)
-
             _stage("Scraping top pages from GA4...")
-            top5 = _scrape_ga4_page_paths(context, report_name, start_date, end_date, existing_page=ga4_page)
+            top5 = _scrape_ga4_page_paths(context, report_name, start_date, end_date)
 
             import urllib.parse as _up
             domain_root = _up.urlparse(base_url).netloc.split(".")[1]
