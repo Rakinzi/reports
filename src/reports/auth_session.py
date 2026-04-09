@@ -30,7 +30,6 @@ def _auth_worker(target_url: str) -> None:
         launch_args = [
             f"--profile-directory={chrome_profile_directory}",
             "--disable-blink-features=AutomationControlled",
-            "--start-maximized",
         ]
         closed = threading.Event()
 
@@ -42,7 +41,7 @@ def _auth_worker(target_url: str) -> None:
                     headless=False,
                     args=launch_args,
                     ignore_default_args=["--enable-automation"],
-                    no_viewport=True,
+                    viewport={"width": 1920, "height": 1080},
                 )
             except Exception:
                 context = playwright.chromium.launch_persistent_context(
@@ -50,7 +49,7 @@ def _auth_worker(target_url: str) -> None:
                     headless=False,
                     args=launch_args,
                     ignore_default_args=["--enable-automation"],
-                    no_viewport=True,
+                    viewport={"width": 1920, "height": 1080},
                 )
 
             page = context.pages[0] if context.pages else context.new_page()

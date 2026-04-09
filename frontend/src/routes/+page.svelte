@@ -359,9 +359,19 @@
 													</Button>
 												</div>
 											{:else if report.status === 'pending'}
-												<div class="flex items-center justify-end gap-1.5 text-xs text-zinc-500">
-													<Loader2 class="h-3 w-3 animate-spin" />
-													{report.stage ?? 'Processing...'}
+												<div class="flex items-center justify-end gap-2">
+													<div class="flex items-center gap-1.5 text-xs text-zinc-400">
+														<Loader2 class="h-3 w-3 animate-spin" />
+														{report.stage ?? 'Processing...'}
+													</div>
+													<Button
+														size="sm"
+														variant="ghost"
+														class="h-6 px-2 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+														onclick={() => goto('/logs')}
+													>
+														Logs
+													</Button>
 												</div>
 											{:else if report.status === 'failed'}
 												<span class="text-xs text-red-400" title={report.error ?? ''}>Failed</span>

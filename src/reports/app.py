@@ -3,7 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 
 from .auth_session import auth_session_status, open_google_sign_in
 from .chrome_profiles import list_profiles
@@ -12,7 +12,7 @@ from .db import (
     update_report_completed, update_report_failed,
     update_report_slides_dir, update_report_edits, update_report_stage,
 )
-from .logging_utils import configure_logging, get_log_path, read_recent_logs
+from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
 from .runtime import get_runtime_status, load_runtime_environment, save_settings
 from .schemas import AppSettingsUpdate, GenerateReportRequest
 
@@ -112,6 +112,19 @@ def post_google_sign_in():
 @app.get("/logs")
 def get_logs(limit: int = 200):
     return JSONResponse({"path": str(get_log_path()), "lines": read_recent_logs(limit)})
+
+
+@app.get("/logs/stream")
+def get_logs_stream():
+    """SSE endpoint — streams log lines in real time to any connected client."""
+    return StreamingResponse(
+        stream_logs(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/reports/generate", status_code=202)
