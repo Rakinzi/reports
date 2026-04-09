@@ -41,7 +41,8 @@
 		{ value: 'ecocash', label: 'EcoCash' },
 		{ value: 'ecosure', label: 'Ecosure' },
 		{ value: 'zimplats', label: 'Zimplats' },
-		{ value: 'cancer_serve', label: 'Cancer Serve' }
+		{ value: 'cancer_serve', label: 'Cancer Serve' },
+		{ value: 'dicomm', label: 'Dicomm McCann' }
 	];
 
 	const STAT_CARDS = [
@@ -176,7 +177,7 @@
 				await refreshReports();
 				if (report.status === 'completed') {
 					clearInterval(interval);
-					await downloadReport(report);
+					goto(`/reports/${id}/preview`);
 				} else if (report.status === 'failed') {
 					clearInterval(interval);
 				}
@@ -338,19 +339,29 @@
 										<TableCell class="text-xs text-zinc-500">{formatDate(report.created_at)}</TableCell>
 										<TableCell class="text-right">
 											{#if report.status === 'completed' && report.output_path}
-												<Button
-													size="sm"
-													variant="ghost"
-													class="text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
-													onclick={() => void downloadReport(report)}
-												>
-													<Download class="mr-1.5 h-3.5 w-3.5" />
-													Save
-												</Button>
+												<div class="flex items-center justify-end gap-2">
+													<Button
+														size="sm"
+														variant="ghost"
+														class="text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+														onclick={() => goto(`/reports/${report.id}/preview`)}
+													>
+														Preview & Edit
+													</Button>
+													<Button
+														size="sm"
+														variant="ghost"
+														class="text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
+														onclick={() => void downloadReport(report)}
+													>
+														<Download class="mr-1.5 h-3.5 w-3.5" />
+														Save
+													</Button>
+												</div>
 											{:else if report.status === 'pending'}
 												<div class="flex items-center justify-end gap-1.5 text-xs text-zinc-500">
 													<Loader2 class="h-3 w-3 animate-spin" />
-													Processing
+													{report.stage ?? 'Processing...'}
 												</div>
 											{:else if report.status === 'failed'}
 												<span class="text-xs text-red-400" title={report.error ?? ''}>Failed</span>

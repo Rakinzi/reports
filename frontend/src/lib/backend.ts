@@ -8,6 +8,7 @@ export type Report = {
 	status: 'pending' | 'completed' | 'failed';
 	output_path?: string | null;
 	error?: string | null;
+	stage?: string | null;
 	created_at: string;
 };
 
@@ -75,4 +76,55 @@ export async function waitForBackend(
 	}
 
 	throw new Error('The local backend did not start in time.');
+}
+
+export type SlideField = {
+	field_id: string;
+	label: string;
+	value: string;
+	slide_index: number;
+	shape_name: string;
+	para_index: number;
+};
+
+export type Slide = {
+	slide_index: number;
+	image_url: string | null;
+	fields: SlideField[];
+};
+
+export async function fetchSlides(apiBaseUrl: string, reportId: number): Promise<Slide[]> {
+	return fetchJson<Slide[]>(apiBaseUrl, `/reports/${reportId}/slides`);
+}
+
+export async function rewriteField(
+	apiBaseUrl: string,
+	reportId: number,
+	slideIndex: number,
+	fieldId: string,
+	currentText: string,
+	instruction: string
+): Promise<string> {
+	const res = await fetchJson<{ rewritten_text: string }>(
+		apiBaseUrl,
+		`/reports/${reportId}/slides/${slideIndex}/rewrite`,
+		{
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ field_id: fieldId, current_text: currentText, instruction }),
+		}
+	);
+	return res.rewritten_text;
+}
+
+export async function applyEdits(
+	apiBaseUrl: string,
+	reportId: number,
+	edits: Record<string, string>
+): Promise<{ output_path: string; download_url: string }> {
+	return fetchJson(apiBaseUrl, `/reports/${reportId}/apply-edits`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ edits }),
+	});
 }

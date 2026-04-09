@@ -10,6 +10,7 @@ ReportName = Literal[
     "ecosure",
     "zimplats",
     "cancer_serve",
+    "dicomm",
 ]
 
 

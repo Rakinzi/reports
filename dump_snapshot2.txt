@@ -1,0 +1,269 @@
+ Analytics
+C2 Digital
+chevron_right
+Econet Wireless Zimbabwe
+Econet Wireless Zimbabwe - GA4
+arrow_drop_down
+search
+Feedback
+help
+Home
+Reports
+Explore
+Advertising
+Admin
+Reports snapshot
+Realtime overview
+Realtime pages
+Life cycle
+Acquisition
+Engagement
+Monetization
+Retention
+User
+User attributes
+Tech
+A
+All Users
+Add comparison
+Custom
+Feb 1 - Feb 28, 2026
+Reports snapshot
+Active users
+34K
+New users
+32K
+Average engagement time per active user
+47s
+Total revenue
+$0.00
+This card uses 100% of available data. Click to view more information.
+01Feb
+08
+15
+22
+0
+500
+1K
+1.5K
+2K
+ACTIVE USERS IN LAST 30 MINUTES
+54
+This card uses 100% of available data. Click to view more information.
+ACTIVE USERS PER MINUTE
+TOP COUNTRIES	ACTIVE USERS
+Zimbabwe	39
+Singapore	3
+South Africa	3
+India	2
+Botswana	1
+
+
+
+
+
+
+
+
+
+
+View realtime
+Insights
+Your Insights will appear here soon.
+In the meantime, you can create new custom insights to monitor your most important metrics. Learn more
+View all insights
+New users
+ by 
+First user primary channel group (Default Channel Group)
+This card uses 100% of available data. Click to view more information.
+Organic Search
+Paid Search
+Direct
+Paid Social
+Referral
+Paid Other
+Organic Social
+0
+5K
+10K
+View user acquisition
+Sessions
+ by 
+Session primary channel group (Default Channel Group)
+This card uses 100% of available data. Click to view more information.
+SESSION PRIMARY CHANNEL GROUP (DEFAULT CHANNEL GROUP)	SESSIONS
+Organic Search	22K
+Paid Search	13K
+Direct	5.3K
+Paid Social	4.7K
+Referral	1.4K
+Paid Other	773
+Organic Social	546
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+View traffic acquisition
+Active users
+ by Country
+This card uses 100% of available data. Click to view more information.
+Map data ©2026
+Terms
+COUNTRY	ACTIVE USERS
+Zimbabwe	29K
+South Africa	1.2K
+United States	1K
+United Kingdom	724
+China	642
+Netherlands	335
+Singapore	188
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+View countries
+User activity over time
+This card uses 100% of available data. Click to view more information.
+01Feb
+08
+15
+22
+0
+20K
+40K
+60K
+30 DAYS
+37K
+7 DAYS
+8.5K
+1 DAY
+1.2K
+User activity by cohort
+Based on device data only
+This card uses 100% of available data. Click to view more information.
+Week 0
+Week 1
+Week 2
+Week 3
+Week 4
+Week 5
+All Users
+Feb 22 - Feb 28
+Mar 1 - Mar 7
+Mar 8 - Mar 14
+Mar 15 - Mar 21
+Mar 22 - Mar 28
+Mar 29 - Apr 4
+100.0%
+2.1%
+1.1%
+0.7%
+0.5%
+0.4%
+6 weeks ending Apr 4
+View retention
+Views
+ by Page title and screen class
+This card uses 100% of available data. Click to view more information.
+PAGE TITLE AND SCREEN CLASS	VIEWS
+iJoy afta joy – Terms and Conditions - Econet Wireless Zimbabwe	22K
+Econet Wireless Zimbabwe	9.6K
+Devices - Econet Wireless Zimbabwe	6.9K
+Econet Wireless Zimbabwe - Contact Us	4K
+eSim - Econet Wireless Zimbabwe	3.6K
+USD Data Bundles - Econet Wireless Zimbabwe	2.8K
+Econet Wireless Zimbabwe - Customer Experience	1.6K
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+View pages and screens
+Event count
+ by Event name
+This card uses 100% of available data. Click to view more information.
+EVENT NAME	EVENT COUNT
+page_view	70K
+session_start	48K
+first_visit	32K
+user_engagement	28K
+yamurai_name_input	21K
+yamurai_chat_click	9.7K
+live_chat	9.5K
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+View events
+Key events
+ by Event name
+This card uses 100% of available data. Click to view more information.
+EVENT NAME	KEY EVENTS
+live_chat	7K
+
+
+Average 120d value
+ by 
+First user primary channel group (Default Channel Group)
+This card uses 100% of available data. Click to view more information.
+$0.00
+$0.20
+$0.40
+$0.60
+$0.80
+$1.00
+No data available
+View user acquisition cohorts
+Items purchased
+ by Item name
+This card uses 100% of available data. Click to view more information.
+ITEM NAME	ITEMS PURCHASED
+No data available
+View ecommerce purchases
+Key events
+ by Platform
+This card uses 100% of available data. Click to view more information.
+WEB
+100.0%
+View tech details
+© 2026 Google | Analytics home | Terms of Service | Privacy Policy | 
+Send feedback

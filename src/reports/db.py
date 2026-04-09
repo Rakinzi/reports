@@ -28,9 +28,17 @@ def init_db() -> None:
                 status      TEXT    NOT NULL DEFAULT 'pending',
                 output_path TEXT,
                 error       TEXT,
+                slides_dir  TEXT,
+                edits       TEXT,
                 created_at  TEXT    NOT NULL
             )
         """)
+        # Safe migration for existing databases
+        for col, coldef in [("slides_dir", "TEXT"), ("edits", "TEXT"), ("stage", "TEXT")]:
+            try:
+                conn.execute(f"ALTER TABLE reports ADD COLUMN {col} {coldef}")
+            except Exception:
+                pass  # Column already exists
         conn.commit()
 
 
@@ -80,3 +88,31 @@ def get_report(report_id: int) -> dict | None:
             "SELECT * FROM reports WHERE id=?", (report_id,)
         ).fetchone()
         return dict(row) if row else None
+
+
+def update_report_slides_dir(report_id: int, slides_dir: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET slides_dir=? WHERE id=?",
+            (slides_dir, report_id),
+        )
+        conn.commit()
+
+
+def update_report_stage(report_id: int, stage: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET stage=? WHERE id=?",
+            (stage, report_id),
+        )
+        conn.commit()
+
+
+def update_report_edits(report_id: int, edits: str) -> None:
+    """edits is a JSON string of {field_id: new_text}."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET edits=? WHERE id=?",
+            (edits, report_id),
+        )
+        conn.commit()

@@ -9,6 +9,7 @@ use tauri::{Manager, State};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
 const BACKEND_PORT: u16 = 38945;
+const UI_VERSION_MARKER: &str = "ui-version.txt";
 
 struct BackendState {
     child: Mutex<Option<CommandChild>>,
@@ -72,6 +73,37 @@ fn spawn_backend(app: &tauri::AppHandle) -> Result<CommandChild, String> {
     Ok(child)
 }
 
+fn clear_stale_webview_data(app: &tauri::AppHandle) -> Result<(), String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?;
+    fs::create_dir_all(&app_data_dir).map_err(|err| err.to_string())?;
+
+    let current_version = app.package_info().version.to_string();
+    let version_marker = app_data_dir.join(UI_VERSION_MARKER);
+    let previous_version = fs::read_to_string(&version_marker)
+        .ok()
+        .map(|value| value.trim().to_string());
+
+    if previous_version.as_deref() == Some(current_version.as_str()) {
+        return Ok(());
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        window
+            .clear_all_browsing_data()
+            .map_err(|err| err.to_string())?;
+    }
+
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let _ = fs::remove_dir_all(&cache_dir);
+        let _ = fs::create_dir_all(&cache_dir);
+    }
+
+    fs::write(version_marker, current_version).map_err(|err| err.to_string())
+}
+
 pub fn run() {
     let backend_url = format!("http://127.0.0.1:{BACKEND_PORT}");
 
@@ -84,6 +116,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![get_backend_url, download_report])
         .setup(|app| {
+            clear_stale_webview_data(app.handle())?;
             let child = spawn_backend(app.handle())?;
             let state = app.state::<BackendState>();
             let mut guard = state.child.lock().map_err(|err| err.to_string())?;

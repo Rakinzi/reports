@@ -87,6 +87,8 @@ def build_sidecar(target_triple: str) -> Path:
         BINARIES_DIR.mkdir(parents=True, exist_ok=True)
         source = dist_dir / f"reports-api{extension}"
         target = BINARIES_DIR / f"reports-api-{target_triple}{extension}"
+        if target.exists():
+            target.unlink()
         shutil.copy2(source, target)
         if extension == "":
             target.chmod(0o755)

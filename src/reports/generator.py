@@ -50,6 +50,7 @@ GA4_PROPERTIES = {
     "ecocash":      "386950925",
     "econet":       "386649040",
     "ecosure":      "384507667",
+    "dicomm":       "382296904",
 }
 
 TEMPLATES = {
@@ -61,6 +62,7 @@ TEMPLATES = {
     "zimplats":     "Zimplats February 2026 Website Report.pptx",
     "cancer_serve": "Cancer Serve February 2025 Website Report.pptx",
 }
+
 
 # GA4 sections to screenshot per report — (label, url fragment)
 GA4_SECTIONS = [
@@ -173,18 +175,44 @@ def _switch_ga4_property_via_search(page, property_key: str):
     if search_input is None:
         raise RuntimeError("Could not find the GA4 search bar to switch properties.")
 
+    url_before_fill = page.url
     search_input.click()
-    search_input.fill(property_id)
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(500)
+    search_input.press_sequentially(property_id, delay=80)
+
+    # Give GA4 a moment to react — it may auto-navigate via the Insights panel
+    # (typing the property ID triggers an "Ask Analytics Advisor" flow that lands
+    # directly on the correct property without requiring a dropdown click).
+    page.wait_for_timeout(3000)
+
+    # Only skip click logic if GA4 *navigated* to the correct property after the fill
+    # (URL must have changed to include the property token).
+    if f"p{property_id}" in page.url and page.url != url_before_fill:
+        logger.info(
+            "GA4 auto-navigated to correct property after search fill. property_id=%s url=%s",
+            property_id, page.url,
+        )
+        try:
+            search_input.press("Escape")
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+        return page
 
     result_candidates = page.locator('[role="option"], [role="menuitem"], a, button, li')
+    # Match results whose own label contains "(GA4 Property <id>)" — avoids matching
+    # results that only mention the id in a description sub-element.
+    ga4_label_result = result_candidates.filter(
+        has_text=re.compile(rf"GA4 Property\s+{re.escape(property_id)}", re.I)
+    )
+    # Fallback: any result whose text contains the bare property id
     exact_result = result_candidates.filter(
         has_text=re.compile(rf"\b{re.escape(property_id)}\b")
     )
     previous_page_count = len(page.context.pages)
 
-    if _click_nth_visible(result_candidates, 1):
-        logger.info("Selected second visible GA4 search result for property_id=%s", property_id)
+    if _click_first_visible(ga4_label_result):
+        logger.info("Selected GA4 property result by label for property_id=%s", property_id)
     elif _click_first_visible(exact_result):
         logger.info("Selected GA4 search result matching property_id=%s", property_id)
     elif _click_first_visible(result_candidates):
@@ -210,7 +238,9 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
     last_error: Exception | None = None
     for attempt in range(1, 4):
         try:
-            page = _switch_ga4_property_via_search(page, property_key)
+            # Only switch property via search if not already on the correct property.
+            if expected_token not in page.url:
+                page = _switch_ga4_property_via_search(page, property_key)
             url = _ga4_navigation_url(page, property_key, section_fragment)
             logger.info(
                 "Navigating to GA4 property=%s section=%s attempt=%s url=%s",
@@ -532,6 +562,7 @@ def _generate_slide5_text(countries: dict) -> str:
     return response.text.strip()
 
 
+
 def _weekly_ranges(start_date: str, end_date: str) -> list[tuple[str, str, str]]:
     """Split a date range into 4 weekly chunks.
     Returns list of (label, week_start, week_end) in GA4 picker format e.g. 'Feb 1, 2026'.
@@ -577,6 +608,12 @@ def capture_screenshots_and_metrics(
 
             # --- Home page: set date range + scrape metrics ---
             page = _goto_ga4_section(page, report_name, "/home")
+            # Dismiss any lingering search/insights panel before interacting with the page.
+            try:
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
             _set_date_range(page, start_date, end_date)
             home_metrics = _scrape_home_metrics(page)
 
@@ -633,6 +670,19 @@ def capture_screenshots_and_metrics(
             page.get_by_role("button", name="Apply").click()
             page.wait_for_timeout(3000)
             snapshot_metrics = _scrape_snapshot_metrics(page)
+
+            # --- Snapshot KPI card screenshot (Active users / New users / Avg engagement + line chart) ---
+            try:
+                card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
+                card_el.wait_for(state="visible", timeout=10000)
+                page.mouse.move(0, 0)
+                page.mouse.click(0, 0)
+                page.wait_for_timeout(800)
+                path = out_dir / "snapshot_card.png"
+                card_el.screenshot(path=str(path))
+                screenshots["snapshot_card"] = path
+            except Exception:
+                pass
 
             # --- Countries table screenshot for slide 6 ---
             try:
@@ -847,12 +897,35 @@ Focus on traffic trends, user engagement, and acquisition channels.
 UNSUPPORTED_REPORTS = {"union_hardware"}
 
 
+def _fill_text_run(para, new_text: str) -> None:
+    """Replace a paragraph's text with new_text, preserving the first run's rPr formatting."""
+    from pptx.oxml.ns import qn
+    from copy import deepcopy
+    import lxml.etree as etree
+
+    if not para.runs:
+        return
+    first_rpr = para.runs[0]._r.find(qn("a:rPr"))
+    saved_rpr = deepcopy(first_rpr) if first_rpr is not None else None
+    for child in list(para._p):
+        if child.tag != qn("a:pPr"):
+            para._p.remove(child)
+    new_r = etree.SubElement(para._p, qn("a:r"))
+    if saved_rpr is not None:
+        new_r.insert(0, saved_rpr)
+    new_t = etree.SubElement(new_r, qn("a:t"))
+    new_t.text = new_text
+
+
+
+
 def generate_report(
     report_name: str,
     date_range: str,
     report_date: str,
     start_date: str,
     end_date: str,
+    _stage_callback=None,
 ) -> Path:
     """Full pipeline: screenshots + metrics → slide 3 paragraph → pptx edit → recommendations → save.
     date_range: human label e.g. '1 February 2026 - 28 February 2026'
@@ -862,6 +935,17 @@ def generate_report(
         raise NotImplementedError(
             f"'{report_name}' has a unique template structure and is not yet supported. "
             "A dedicated generator will be built for it."
+        )
+
+    # Dispatch to 2026 pipeline for new-format templates
+    from .generator_2026 import TEMPLATES_2026, generate_report_2026
+    if report_name in TEMPLATES_2026:
+        return generate_report_2026(
+            report_name=report_name,
+            date_range=date_range,
+            report_date=report_date,
+            start_date=start_date,
+            end_date=end_date,
         )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
