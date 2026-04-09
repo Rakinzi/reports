@@ -1,6 +1,6 @@
 {
 	"name": "frontend",
-	"version": "0.0.1",
+	"version": "0.1.1",
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -15,8 +15,9 @@
 		"test:e2e": "playwright test",
 		"desktop:build-sidecar": "python3 ../scripts/build_sidecar.py",
 		"tauri:dev": "tauri dev",
+		"tauri:clean": "rm -rf src-tauri/target/release/bundle src-tauri/target/release/reports-desktop",
 		"tauri:build": "tauri build",
-		"tauri:build:dmg": "bun run tauri:build && bash ../scripts/build_dmg.sh"
+		"tauri:build:dmg": "bun run tauri:clean && bun run tauri:build"
 	},
 	"type": "module",
 	"dependencies": {

@@ -39,6 +39,12 @@ def get_screenshots_dir() -> Path:
     return path
 
 
+def get_slides_dir() -> Path:
+    path = get_app_data_dir() / "slides"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_database_path() -> Path:
     return get_app_data_dir() / "reports.db"
 

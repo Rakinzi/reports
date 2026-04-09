@@ -201,6 +201,10 @@
 							<div class="mt-2 break-all font-mono text-xs text-zinc-300">
 								{settings.app_data_dir || 'not available yet'}
 							</div>
+							<p class="mt-3 text-xs text-zinc-500">
+								On macOS this folder survives uninstall, so desktop cache/session data can outlive the
+								app bundle.
+							</p>
 						</div>
 						<div class="rounded-xl border border-zinc-800 bg-zinc-950/70 p-4">
 							<div class="text-xs uppercase tracking-[0.18em] text-zinc-500">Session Profile</div>
