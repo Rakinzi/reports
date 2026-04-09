@@ -1,0 +1,11 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run desktop:build-sidecar && npm run dev"
+  },
+  "bundle": {
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/icon.png"
+    ]
+  }
+}
