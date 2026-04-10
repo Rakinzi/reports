@@ -1218,38 +1218,46 @@ def _prev_month_date_range(start_date: str) -> tuple[str, str]:
 
 
 def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str):
-    """Scrape previous month GA4 home metrics. Returns (prev_home_metrics, page) — page stays open for reuse."""
-    prev_home_metrics: dict = {}
+    """Scrape previous-month GA4 metrics for slide 7. Returns (prev_ga4_metrics, page)."""
+    prev_ga4_metrics: dict = {}
     page = context.new_page()
     try:
         prev_start, prev_end = _prev_month_date_range(start_date)
-        page.bring_to_front()
-        # Navigate directly to the property home URL — avoids needing the search bar
-        home_url = _ga4_url(report_name, "/home")
-        try:
-            page.goto(home_url, wait_until="domcontentloaded", timeout=30000)
-        except Exception:
-            pass
-        page.wait_for_timeout(3000)
-        # Confirm we're on the right property, retry with search if not
-        if _ga4_property_token(report_name) not in page.url:
-            page = _switch_ga4_property_via_search(page, report_name)
-        page = _goto_ga4_section(page, report_name, "/home")
-        try:
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(1000)
-        except Exception:
-            pass
-        # Wait for the home page metrics to load before interacting with the date picker
-        try:
-            page.wait_for_selector(".metric-container", timeout=15000)
-        except Exception:
-            pass
-        _set_date_range(page, prev_start, prev_end)
-        prev_home_metrics = _scrape_home_metrics(page)
+        (
+            prev_home_metrics,
+            prev_snapshot_metrics,
+            prev_page_views,
+            prev_pages_data,
+            prev_site_total_views,
+            prev_countries_data,
+            page,
+        ) = _capture_ga4_metrics_no_screenshots(context, report_name, prev_start, prev_end, existing_page=page)
+        prev_search_metrics: dict = {}
+        if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
+            try:
+                prev_search_metrics, _ = _capture_gsc(
+                    context,
+                    report_name,
+                    prev_start,
+                    prev_end,
+                    Path("artifacts/screenshots/prev_period_gsc"),
+                )
+            except Exception as e:
+                logger.warning("[2026] Previous-period GSC scrape failed: %s", e)
+        prev_ga4_metrics = {
+            "home_metrics": prev_home_metrics,
+            "snapshot_metrics": prev_snapshot_metrics,
+            "page_views": prev_page_views,
+            "pages_data": prev_pages_data,
+            "site_total_views": prev_site_total_views,
+            "countries_data": prev_countries_data,
+            "search_metrics": prev_search_metrics,
+            "start_date": prev_start,
+            "end_date": prev_end,
+        }
     except Exception as e:
         logger.warning("[2026] Previous month metrics scrape failed: %s", e)
-    return prev_home_metrics, page
+    return prev_ga4_metrics, page
 
 
 def _scrape_previous_month_metrics(
@@ -1258,17 +1266,177 @@ def _scrape_previous_month_metrics(
     end_date: str,
 ) -> dict:
     """Scrape GA4 home metrics for the previous month. Opens its own browser session."""
-    prev_home_metrics: dict = {}
+    prev_ga4_metrics: dict = {}
     with sync_playwright() as p:
         context = _launch_persistent_context(p, headless=False)
         try:
-            prev_home_metrics, _page = _scrape_prev_metrics_with_context(context, report_name, start_date)
+            prev_ga4_metrics, _page = _scrape_prev_metrics_with_context(context, report_name, start_date)
         finally:
             try:
                 context.close()
             except Exception:
                 pass
-    return prev_home_metrics
+    return prev_ga4_metrics
+
+
+def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_date: str):
+    """Open Reports snapshot from Home and apply the requested date range."""
+    from datetime import datetime as _dt
+
+    _ensure_expected_ga4_property(page, report_name)
+    page.locator("span.view-link-text", has_text="View reports snapshot").click()
+    page.wait_for_timeout(3000)
+    _ensure_expected_ga4_property(page, report_name)
+    snapshot_date_btn = page.get_by_role("combobox", name="Open date range picker").first
+    snapshot_date_btn.wait_for(state="visible", timeout=15000)
+    snapshot_date_btn.click()
+    page.wait_for_timeout(1000)
+    page.get_by_role("menuitem").filter(has_text="Custom").click()
+    page.wait_for_timeout(1000)
+    start_input = page.get_by_label("Start date")
+    start_input.wait_for(state="visible", timeout=10000)
+    start_input.click()
+    start_input.select_text()
+    start_input.fill(start_date)
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(500)
+    end_input = page.get_by_label("End date")
+    end_input.click()
+    end_input.select_text()
+    end_input.fill(end_date)
+    page.keyboard.press("Tab")
+    page.wait_for_timeout(500)
+    page.get_by_role("button", name="Apply").click()
+    expected_start = _dt.strptime(start_date, "%b %d, %Y").strftime("%Y%m%d")
+    expected_end = _dt.strptime(end_date, "%b %d, %Y").strftime("%Y%m%d")
+    page.wait_for_function(
+        """
+        ({ expectedStart, expectedEnd }) => {
+            const href = window.location.href;
+            return href.includes(`date00%3D${expectedStart}`) &&
+                   href.includes(`date01%3D${expectedEnd}`);
+        }
+        """,
+        arg={"expectedStart": expected_start, "expectedEnd": expected_end},
+        timeout=20000,
+    )
+    page.wait_for_timeout(3000)
+    logger.info(
+        "[2026] Snapshot date confirmed. start_date=%s end_date=%s current_url=%s",
+        start_date,
+        end_date,
+        page.url,
+    )
+
+
+def _scrape_countries_table(page) -> list[dict]:
+    countries_data: list[dict] = []
+    import re as _re
+
+    body = page.locator("body").inner_text()
+    for line in body.splitlines():
+        m = _re.match(
+            r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+%)\t([\d.]+)",
+            line,
+        )
+        if m:
+            countries_data.append({
+                "country": m.group(1).strip(),
+                "users": int(m.group(2).replace(",", "")),
+                "new_users": int(m.group(3).replace(",", "")),
+                "engaged_sessions": int(m.group(4).replace(",", "")),
+                "engagement_rate": m.group(5),
+                "engaged_sessions_per_user": m.group(6),
+            })
+    return countries_data
+
+
+def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
+    page_views: dict = {}
+    pages_data: list[dict] = []
+    site_total_views = 0
+
+    import re as _re
+
+    body = page.locator("body").inner_text()
+    total_m = _re.search(r"\tTotal\t([\d,]+)\n", body)
+    if total_m:
+        site_total_views = int(total_m.group(1).replace(",", ""))
+
+    for line in body.splitlines():
+        m = _re.match(
+            r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+)\t(\S+)",
+            line,
+        )
+        if m and len(pages_data) < 10:
+            title = m.group(1).strip()
+            pages_data.append({
+                "title": title,
+                "views": int(m.group(2).replace(",", "")),
+                "active_users": int(m.group(3).replace(",", "")),
+                "views_per_user": m.group(4),
+                "avg_engagement_time": m.group(5),
+            })
+            if len(page_views) < 4:
+                page_views[title] = int(m.group(2).replace(",", ""))
+
+    return page_views, pages_data, site_total_views
+
+
+def _capture_ga4_metrics_no_screenshots(context, report_name: str, start_date: str, end_date: str, existing_page=None) -> tuple[dict, dict, dict, list[dict], int, list[dict], object]:
+    """Repeat the GA4 metric collection flow without taking screenshots."""
+    home_metrics: dict = {}
+    snapshot_metrics: dict = {}
+    page_views: dict = {}
+    pages_data: list[dict] = []
+    site_total_views: int = 0
+    countries_data: list[dict] = []
+
+    page = existing_page or context.new_page()
+    page.bring_to_front()
+
+    if existing_page is None:
+        page = _switch_ga4_property_via_search(page, report_name)
+
+    page = _goto_ga4_section(page, report_name, "/home")
+    try:
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(1000)
+    except Exception:
+        pass
+
+    _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+    snapshot_metrics = _scrape_snapshot_metrics(page)
+
+    try:
+        page.get_by_text("View countries").click()
+        page.wait_for_timeout(4000)
+        _ensure_expected_ga4_property(page, report_name)
+        page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+        countries_data = _scrape_countries_table(page)
+        page.go_back()
+        page.wait_for_timeout(3000)
+        _ensure_expected_ga4_property(page, report_name)
+    except Exception as e:
+        logger.warning("[2026] Previous-period countries scrape failed: %s", e)
+
+    try:
+        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page.wait_for_timeout(4000)
+        _ensure_expected_ga4_property(page, report_name)
+        page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+        page_views, pages_data, site_total_views = _scrape_pages_table(page)
+    except Exception as e:
+        logger.warning("[2026] Previous-period pages scrape failed: %s", e)
+
+    try:
+        page = _goto_ga4_section(page, report_name, "/home")
+        page.wait_for_timeout(2000)
+        home_metrics = _scrape_home_metrics(page)
+    except Exception as e:
+        logger.warning("[2026] Previous-period home metrics scrape failed: %s", e)
+
+    return home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, page
 
 
 def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date: str, existing_page=None) -> list[dict]:
@@ -1281,40 +1449,13 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
     top5: list[dict] = []
 
     try:
-        def _goto_snapshot_and_set_dates(pg):
-            """Navigate from GA4 home → snapshot → set date range. Inline to avoid _set_date_range combobox timing issues."""
-            pg.get_by_text("View reports snapshot").click()
-            pg.wait_for_timeout(3000)
-            _ensure_expected_ga4_property(pg, report_name)
-            snapshot_date_btn = pg.get_by_role("combobox", name="Open date range picker").first
-            snapshot_date_btn.wait_for(state="visible", timeout=15000)
-            snapshot_date_btn.click()
-            pg.wait_for_timeout(1000)
-            pg.get_by_role("menuitem").filter(has_text="Custom").click()
-            pg.wait_for_timeout(1000)
-            start_input = pg.get_by_label("Start date")
-            start_input.wait_for(state="visible", timeout=10000)
-            start_input.click()
-            start_input.select_text()
-            start_input.fill(start_date)
-            pg.keyboard.press("Tab")
-            pg.wait_for_timeout(500)
-            end_input = pg.get_by_label("End date")
-            end_input.click()
-            end_input.select_text()
-            end_input.fill(end_date)
-            pg.keyboard.press("Tab")
-            pg.wait_for_timeout(500)
-            pg.get_by_role("button", name="Apply").click()
-            pg.wait_for_timeout(3000)
-
         if existing_page is not None:
             # Already on GA4 with correct property — go to home, click snapshot, set dates, click pages and screens
             page = existing_page
             page.bring_to_front()
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
-            _goto_snapshot_and_set_dates(page)
+            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
             page.get_by_role("button", name="View pages and screens", exact=True).click()
             page.wait_for_timeout(4000)
         else:
@@ -1323,7 +1464,7 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             page = _switch_ga4_property_via_search(page, report_name)
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
-            _goto_snapshot_and_set_dates(page)
+            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
             page.get_by_role("button", name="View pages and screens", exact=True).click()
 
         page.wait_for_timeout(4000)
@@ -1534,7 +1675,7 @@ def _scrape_website_pages(
 ) -> tuple[dict, dict]:
     """Navigate GA4 Pages report to get top 5 page titles, resolve real URLs via DDG search, then scrape content.
 
-    Returns (website_pages, prev_home_metrics) — both scraped in a single browser session.
+    Returns (website_pages, prev_ga4_metrics) — both scraped in a single browser session.
     """
     def _stage(msg: str):
         if _stage_callback:
@@ -1545,21 +1686,34 @@ def _scrape_website_pages(
         return {"top": []}, {}
 
     result: dict = {"top": []}
-    prev_home_metrics: dict = {}
-
-    # Capture previous-month metrics in a separate browser session, then close it
-    # before starting the top-pages and live-site capture flow.
-    _stage("Scraping previous month metrics...")
-    try:
-        prev_home_metrics = _scrape_previous_month_metrics(report_name, start_date, end_date)
-    except Exception as e:
-        logger.warning("[2026] Previous month metrics scrape failed in separate session: %s", e)
+    prev_ga4_metrics: dict = {}
 
     with sync_playwright() as p:
         context = _launch_persistent_context(p, headless=False)
+        ga4_page = None
         try:
+            # Keep previous-month metrics and top-pages scraping in the same GA4 session.
+            # This avoids auth/state drift between two separate persistent contexts.
+            _stage("Scraping previous month metrics...")
+            try:
+                prev_ga4_metrics, ga4_page = _scrape_prev_metrics_with_context(context, report_name, start_date)
+                if not prev_ga4_metrics.get("home_metrics"):
+                    logger.warning(
+                        "[2026] Previous month metrics returned no data. report_name=%s start_date=%s",
+                        report_name,
+                        start_date,
+                    )
+            except Exception as e:
+                logger.warning("[2026] Previous month metrics scrape failed in shared session: %s", e)
+
             _stage("Scraping top pages from GA4...")
-            top5 = _scrape_ga4_page_paths(context, report_name, start_date, end_date)
+            top5 = _scrape_ga4_page_paths(
+                context,
+                report_name,
+                start_date,
+                end_date,
+                existing_page=ga4_page,
+            )
 
             import urllib.parse as _up
             domain_root = _up.urlparse(base_url).netloc.split(".")[1]
@@ -1717,17 +1871,18 @@ def _scrape_website_pages(
                 pass
 
     result["qr_codes"] = qr_codes
-    return result, prev_home_metrics
+    return result, prev_ga4_metrics
 
 
 def _generate_recommendations_2026(
     report_name: str,
     home_metrics: dict,
     snapshot_metrics: dict,
+    search_metrics: dict,
     pages_data: list[dict],
     countries_data: list[dict],
     date_range: str,
-    prev_home_metrics: dict | None = None,
+    prev_ga4_metrics: dict | None = None,
     website_pages: dict | None = None,
 ) -> list[dict]:
     """Use Gemini to generate 3 structured recommendations, each with a title + 3 bullet points."""
@@ -1747,18 +1902,50 @@ def _generate_recommendations_2026(
     channels = snapshot_metrics.get("channels", {})
     channels_str = ", ".join(f"{k}: {v}" for k, v in list(channels.items())[:5]) if channels else "N/A"
 
-    # Month-on-month comparison section
+    prev_home_metrics = (prev_ga4_metrics or {}).get("home_metrics", {})
+    prev_snapshot_metrics = (prev_ga4_metrics or {}).get("snapshot_metrics", {})
+    prev_pages_data = (prev_ga4_metrics or {}).get("pages_data", [])
+    prev_countries_data = (prev_ga4_metrics or {}).get("countries_data", [])
+    prev_search_metrics = (prev_ga4_metrics or {}).get("search_metrics", {})
+    prev_channels = prev_snapshot_metrics.get("channels", {})
+    prev_channels_str = ", ".join(f"{k}: {v}" for k, v in list(prev_channels.items())[:5]) if prev_channels else "N/A"
+
     mom_section = ""
-    if prev_home_metrics:
+    if prev_ga4_metrics:
         def _mom(label, key):
             curr = home_metrics.get(key, "N/A")
             prev = prev_home_metrics.get(key, "N/A")
             return f"{label}: {prev} (prev) → {curr} (current)"
+
+        prev_top_pages = ", ".join(
+            f"{p['title'].split(' - ')[0]} ({p['views']:,} views)"
+            for p in prev_pages_data[:5]
+        ) if prev_pages_data else "N/A"
+
+        prev_top_countries = ", ".join(
+            f"{r['country']} ({r['users']:,} users, {r['engagement_rate']} engagement)"
+            for r in sorted(prev_countries_data, key=lambda x: x["users"], reverse=True)[:3]
+        ) if prev_countries_data else "N/A"
+
         mom_section = (
             "\nMonth-on-month comparison:\n"
             + _mom("Active users", "Active users") + "\n"
             + _mom("New users", "New users") + "\n"
             + _mom("Avg engagement time", "Average engagement time per active user") + "\n"
+            + f"Acquisition channels: {prev_channels_str} (prev) → {channels_str} (current)\n"
+            + f"Top pages: {prev_top_pages} (prev) → {top_pages} (current)\n"
+            + f"Top countries: {prev_top_countries} (prev) → {top_countries} (current)\n"
+            + (
+                f"Search metrics: impressions {prev_search_metrics.get('impressions', 'N/A')}, "
+                f"clicks {prev_search_metrics.get('clicks', 'N/A')}, "
+                f"CTR {prev_search_metrics.get('ctr', 'N/A')}, "
+                f"avg position {prev_search_metrics.get('avg_position', 'N/A')} (prev) → "
+                f"impressions {search_metrics.get('impressions', 'N/A')}, "
+                f"clicks {search_metrics.get('clicks', 'N/A')}, "
+                f"CTR {search_metrics.get('ctr', 'N/A')}, "
+                f"avg position {search_metrics.get('avg_position', 'N/A')} (current)\n"
+                if prev_search_metrics else ""
+            )
         )
 
     # CTA audit findings
@@ -1900,17 +2087,18 @@ def _build_recommendations_slide(
     report_name: str,
     home_metrics: dict,
     snapshot_metrics: dict,
+    search_metrics: dict,
     pages_data: list[dict],
     countries_data: list[dict],
     date_range: str,
     report_date: str,
-    prev_home_metrics: dict | None = None,
+    prev_ga4_metrics: dict | None = None,
     website_pages: dict | None = None,
 ) -> None:
     """Replace recommendations on slide 7 (object 7) with Gemini-generated content."""
     recs = _generate_recommendations_2026(
-        report_name, home_metrics, snapshot_metrics, pages_data, countries_data, date_range,
-        prev_home_metrics=prev_home_metrics, website_pages=website_pages,
+        report_name, home_metrics, snapshot_metrics, search_metrics, pages_data, countries_data, date_range,
+        prev_ga4_metrics=prev_ga4_metrics, website_pages=website_pages,
     )
     if not recs:
         return
@@ -1989,7 +2177,7 @@ def generate_report_2026(
 
     # Step 1b: Scrape previous month metrics + visit client website pages in one browser session
     _stage("Scraping previous month metrics + client website pages...")
-    website_pages, prev_home_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
+    website_pages, prev_ga4_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
 
     # Step 2: Load template
     template_path = TEMPLATES_DIR / TEMPLATES_2026[report_name]
@@ -2015,9 +2203,9 @@ def generate_report_2026(
     rec_slide_idx = slide_count - 2
     _build_recommendations_slide(
         prs.slides[rec_slide_idx],
-        report_name, home_metrics, snapshot_metrics,
+        report_name, home_metrics, snapshot_metrics, search_metrics,
         pages_data, countries_data, date_range, report_date,
-        prev_home_metrics=prev_home_metrics,
+        prev_ga4_metrics=prev_ga4_metrics,
         website_pages=website_pages,
     )
 

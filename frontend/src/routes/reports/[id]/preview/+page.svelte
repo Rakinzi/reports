@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
-	import { ChevronLeft, ChevronRight, Download, Loader2, Sparkles, ArrowLeft } from '@lucide/svelte';
+	import { Download, Loader2, Sparkles, ArrowLeft } from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Label } from '$lib/components/ui/label';
 	import {
@@ -24,7 +24,6 @@
 	let loading = $state(true);
 	let error = $state('');
 	let slides = $state<Slide[]>([]);
-	let currentIndex = $state(0);
 	let report = $state<Report | null>(null);
 
 	let editedValues = $state<Record<string, string>>({});
@@ -33,8 +32,9 @@
 
 	let saving = $state(false);
 	let saveError = $state('');
+	let pdfAvailable = $state(false);
 
-	const currentSlide = $derived(slides[currentIndex] ?? null);
+	const pdfUrl = $derived(`${apiBaseUrl}/reports/${reportId}/preview.pdf`);
 
 	function initEdits(slides: Slide[]) {
 		const vals: Record<string, string> = {};
@@ -56,6 +56,9 @@
 			report = await fetchJson<Report>(apiBaseUrl, `/reports/${reportId}`);
 			slides = await fetchSlides(apiBaseUrl, reportId);
 			initEdits(slides);
+			// Check if PDF preview is available
+			const pdfCheck = await fetch(`${apiBaseUrl}/reports/${reportId}/preview.pdf`, { method: 'HEAD' });
+			pdfAvailable = pdfCheck.ok;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load report';
 		} finally {
@@ -89,6 +92,9 @@
 		try {
 			await applyEdits(apiBaseUrl, reportId, editedValues);
 			slides = await fetchSlides(apiBaseUrl, reportId);
+			// Re-check PDF (apply-edits triggers a re-render server-side)
+			const pdfCheck = await fetch(`${apiBaseUrl}/reports/${reportId}/preview.pdf`, { method: 'HEAD' });
+			pdfAvailable = pdfCheck.ok;
 
 			const suggestedName = `${report?.report_name ?? 'report'}-edited.pptx`;
 			if (isTauri) {
@@ -153,107 +159,68 @@
 	{:else}
 		<div class="flex flex-1 overflow-hidden">
 			<div class="flex w-[60%] flex-col border-r border-zinc-800 bg-zinc-950">
-				<div class="flex flex-1 items-center justify-center p-6">
-					{#if currentSlide?.image_url}
-						<img
-							src="{apiBaseUrl}{currentSlide.image_url}"
-							alt="Slide {currentIndex + 1}"
-							class="max-h-full max-w-full rounded shadow-lg object-contain"
-						/>
-					{:else}
-						<div class="flex flex-col items-center gap-3 text-zinc-600">
-							<p class="text-sm">Slide preview unavailable</p>
-							<p class="text-xs">Install LibreOffice to enable slide previews</p>
-						</div>
-					{/if}
-				</div>
-				<div class="flex items-center justify-center gap-4 border-t border-zinc-800 py-3">
-					<Button
-						variant="ghost"
-						size="sm"
-						class="text-zinc-400 hover:text-zinc-100"
-						onclick={() => { currentIndex = Math.max(0, currentIndex - 1); }}
-						disabled={currentIndex === 0}
-					>
-						<ChevronLeft class="h-4 w-4" />
-					</Button>
-					<span class="text-sm text-zinc-400">
-						{currentIndex + 1} / {slides.length}
-					</span>
-					<Button
-						variant="ghost"
-						size="sm"
-						class="text-zinc-400 hover:text-zinc-100"
-						onclick={() => { currentIndex = Math.min(slides.length - 1, currentIndex + 1); }}
-						disabled={currentIndex === slides.length - 1}
-					>
-						<ChevronRight class="h-4 w-4" />
-					</Button>
-				</div>
-				<div class="flex gap-2 overflow-x-auto border-t border-zinc-800 px-4 py-2">
-					{#each slides as slide (slide.slide_index)}
-						<button
-							class="flex-shrink-0 rounded border-2 transition-colors {currentIndex === slide.slide_index ? 'border-zinc-400' : 'border-zinc-700 hover:border-zinc-500'}"
-							onclick={() => { currentIndex = slide.slide_index; }}
-						>
-							{#if slide.image_url}
-								<img
-									src="{apiBaseUrl}{slide.image_url}"
-									alt="Slide {slide.slide_index + 1}"
-									class="h-12 w-20 rounded object-cover"
-								/>
-							{:else}
-								<div class="flex h-12 w-20 items-center justify-center rounded bg-zinc-800 text-xs text-zinc-500">
-									{slide.slide_index + 1}
-								</div>
-							{/if}
-						</button>
-					{/each}
-				</div>
+				{#if pdfAvailable}
+					<iframe
+						src={pdfUrl}
+						title="Report Preview"
+						class="flex-1 w-full border-none"
+					></iframe>
+				{:else}
+					<div class="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-600">
+						<p class="text-sm">Slide preview unavailable</p>
+						<p class="text-xs">Install LibreOffice to enable slide previews</p>
+					</div>
+				{/if}
 			</div>
 
 			<div class="flex w-[40%] flex-col overflow-y-auto p-6">
-				{#if currentSlide && currentSlide.fields.length > 0}
-					<h2 class="mb-4 text-sm font-semibold text-zinc-300">
-						Slide {currentIndex + 1} — Editable Fields
-					</h2>
-					<div class="space-y-6">
-						{#each currentSlide.fields as field (field.field_id)}
-							<div class="space-y-2">
-								<Label class="text-xs font-medium text-zinc-400">{field.label}</Label>
-								<textarea
-									class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 resize-none"
-									rows={editedValues[field.field_id]?.length > 100 ? 5 : 2}
-									bind:value={editedValues[field.field_id]}
-								></textarea>
-								<div class="flex gap-2">
-									<input
-										type="text"
-										placeholder="e.g. make it shorter, focus on new users"
-										class="flex-1 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
-										bind:value={instructions[field.field_id]}
-									/>
-									<Button
-										size="sm"
-										variant="outline"
-										class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 text-xs"
-										onclick={() => handleRewrite(field)}
-										disabled={rewriting[field.field_id]}
-									>
-										{#if rewriting[field.field_id]}
-											<Loader2 class="mr-1.5 h-3 w-3 animate-spin" />
-										{:else}
-											<Sparkles class="mr-1.5 h-3 w-3" />
-										{/if}
-										Rewrite
-									</Button>
+				{#if slides.some(s => s.fields.length > 0)}
+					<div class="space-y-8">
+						{#each slides.filter(s => s.fields.length > 0) as slide (slide.slide_index)}
+							<div>
+								<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+									Slide {slide.slide_index + 1}
+								</h2>
+								<div class="space-y-5">
+									{#each slide.fields as field (field.field_id)}
+										<div class="space-y-2">
+											<Label class="text-xs font-medium text-zinc-400">{field.label}</Label>
+											<textarea
+												class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 resize-none"
+												rows={editedValues[field.field_id]?.length > 100 ? 5 : 2}
+												bind:value={editedValues[field.field_id]}
+											></textarea>
+											<div class="flex gap-2">
+												<input
+													type="text"
+													placeholder="e.g. make it shorter, focus on new users"
+													class="flex-1 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+													bind:value={instructions[field.field_id]}
+												/>
+												<Button
+													size="sm"
+													variant="outline"
+													class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 text-xs"
+													onclick={() => handleRewrite(field)}
+													disabled={rewriting[field.field_id]}
+												>
+													{#if rewriting[field.field_id]}
+														<Loader2 class="mr-1.5 h-3 w-3 animate-spin" />
+													{:else}
+														<Sparkles class="mr-1.5 h-3 w-3" />
+													{/if}
+													Rewrite
+												</Button>
+											</div>
+										</div>
+									{/each}
 								</div>
 							</div>
 						{/each}
 					</div>
 				{:else}
 					<div class="flex flex-1 items-center justify-center text-sm text-zinc-600">
-						No editable fields on this slide.
+						No editable fields found.
 					</div>
 				{/if}
 			</div>

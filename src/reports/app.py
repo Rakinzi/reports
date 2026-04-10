@@ -44,16 +44,16 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
         update_report_completed(report_id, str(output_path))
         logger.info("Completed report generation for report_id=%s output_path=%s", report_id, output_path)
 
-        # Render slides to PNG for preview (non-fatal if LibreOffice not installed)
+        # Render PDF preview (non-fatal if LibreOffice not installed)
         try:
-            from .slides import render_slides
+            from .slides import render_pdf
             from pathlib import Path as _Path
             update_report_stage(report_id, "Rendering slide previews...")
-            slides_dir = render_slides(report_id, _Path(output_path))
-            update_report_slides_dir(report_id, str(slides_dir))
-            logger.info("Rendered slides for report_id=%s slides_dir=%s", report_id, slides_dir)
+            pdf_path = render_pdf(report_id, _Path(output_path))
+            update_report_slides_dir(report_id, str(pdf_path.parent))
+            logger.info("Rendered PDF preview for report_id=%s pdf=%s", report_id, pdf_path)
         except Exception as render_err:
-            logger.warning("Slide rendering failed for report_id=%s: %s", report_id, render_err)
+            logger.warning("PDF preview rendering failed for report_id=%s: %s", report_id, render_err)
     except Exception as e:
         update_report_failed(report_id, str(e))
         logger.exception("Report generation failed for report_id=%s", report_id)
@@ -192,6 +192,35 @@ def download_report(report_id: int):
     )
 
 
+@app.get("/reports/{report_id}/preview.pdf")
+def get_report_preview_pdf(report_id: int):
+    from pathlib import Path as _Path
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] != "completed" or not report["output_path"]:
+        raise HTTPException(status_code=400, detail="Report is not ready")
+
+    output_path = _resolve_report_path(report["output_path"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Report file not found on disk")
+
+    # Check for a cached preview.pdf
+    slides_dir = report.get("slides_dir")
+    if slides_dir:
+        cached = _Path(slides_dir) / "preview.pdf"
+        if cached.exists():
+            return FileResponse(str(cached), media_type="application/pdf")
+
+    # Generate on demand
+    try:
+        from .slides import render_pdf
+        pdf_path = render_pdf(report_id, output_path)
+        return FileResponse(str(pdf_path), media_type="application/pdf")
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+
 @app.get("/reports/{report_id}/slides")
 def get_report_slides(report_id: int):
     from pathlib import Path as _Path
@@ -291,11 +320,11 @@ def apply_report_edits(report_id: int, body: dict):
     update_report_edits(report_id, _json.dumps(edits))
 
     try:
-        from .slides import render_slides
-        slides_dir = render_slides(report_id, edited_path)
-        update_report_slides_dir(report_id, str(slides_dir))
+        from .slides import render_pdf
+        pdf_path = render_pdf(report_id, edited_path)
+        update_report_slides_dir(report_id, str(pdf_path.parent))
     except Exception as render_err:
-        logger.warning("Slide re-render failed after edits for report_id=%s: %s", report_id, render_err)
+        logger.warning("PDF re-render failed after edits for report_id=%s: %s", report_id, render_err)
 
     return JSONResponse({
         "output_path": str(edited_path),
