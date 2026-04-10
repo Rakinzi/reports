@@ -44,7 +44,7 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
         update_report_completed(report_id, str(output_path))
         logger.info("Completed report generation for report_id=%s output_path=%s", report_id, output_path)
 
-        # Render PDF preview (non-fatal if LibreOffice not installed)
+        # Render PDF preview
         try:
             from .slides import render_pdf
             from pathlib import Path as _Path

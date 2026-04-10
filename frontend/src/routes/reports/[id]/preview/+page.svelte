@@ -168,7 +168,6 @@
 				{:else}
 					<div class="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-600">
 						<p class="text-sm">Slide preview unavailable</p>
-						<p class="text-xs">Install LibreOffice to enable slide previews</p>
 					</div>
 				{/if}
 			</div>

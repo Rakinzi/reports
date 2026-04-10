@@ -1240,7 +1240,7 @@ def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str
                     report_name,
                     prev_start,
                     prev_end,
-                    Path("artifacts/screenshots/prev_period_gsc"),
+                    SCREENSHOTS_DIR / "prev_period_gsc",
                 )
             except Exception as e:
                 logger.warning("[2026] Previous-period GSC scrape failed: %s", e)
@@ -1486,8 +1486,8 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
         try:
             import pathlib as _pl
             _header_html = page.locator("thead").first.inner_html()
-            _pl.Path("artifacts/ga4_thead_debug.html").write_text(_header_html, encoding="utf-8")
-            logger.info("[2026] Dumped GA4 thead HTML → artifacts/ga4_thead_debug.html")
+            (SCREENSHOTS_DIR / "ga4_thead_debug.html").write_text(_header_html, encoding="utf-8")
+            logger.info("[2026] Dumped GA4 thead HTML → %s", SCREENSHOTS_DIR / "ga4_thead_debug.html")
         except Exception:
             pass
 
@@ -1718,7 +1718,7 @@ def _scrape_website_pages(
             import urllib.parse as _up
             domain_root = _up.urlparse(base_url).netloc.split(".")[1]
 
-            screenshots_dir = out_dir = Path("artifacts/screenshots/site_pages")
+            screenshots_dir = out_dir = SCREENSHOTS_DIR / "site_pages"
             screenshots_dir.mkdir(parents=True, exist_ok=True)
 
             site_page = context.new_page()
