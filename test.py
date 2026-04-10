@@ -38,8 +38,11 @@ def run(report_name: str, start_date: str, end_date: str) -> None:
 
     # --- Slide 7: Both scrapes in one browser session ---
     print(f"{INFO} Scraping client website pages + previous month metrics (single browser session)...")
-    website_pages, prev_home_metrics = _scrape_website_pages(report_name, start_date, end_date)
-    print(f"{PASS} Previous month metrics: {prev_home_metrics}")
+    website_pages, prev_ga4_metrics = _scrape_website_pages(report_name, start_date, end_date)
+    print(f"{PASS} Previous month home metrics: {prev_ga4_metrics.get('home_metrics', {})}")
+    print(f"{PASS} Previous month channels: {prev_ga4_metrics.get('snapshot_metrics', {}).get('channels', {})}")
+    print(f"{PASS} Previous month countries: {len(prev_ga4_metrics.get('countries_data', []))}")
+    print(f"{PASS} Previous month pages: {len(prev_ga4_metrics.get('pages_data', []))}")
     pages_data_stub = []  # not used for recommendations — website_pages has the real data
     print(f"{PASS} Top pages scraped: {len(website_pages.get('top', []))}")
     any_404 = False
@@ -86,11 +89,12 @@ def run(report_name: str, start_date: str, end_date: str) -> None:
         report_name,
         home_metrics={},
         snapshot_metrics={},
+        search_metrics={},
         pages_data=pages_data_stub,
         countries_data=[],
         date_range=f"{start_date} - {end_date}",
         report_date="",
-        prev_home_metrics=prev_home_metrics,
+        prev_ga4_metrics=prev_ga4_metrics,
         website_pages=website_pages,
     )
     print(f"{PASS} Slide 7 done.")

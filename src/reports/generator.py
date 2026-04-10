@@ -99,6 +99,27 @@ def _ensure_expected_ga4_property(page, property_key: str, timeout: int = 15000)
     )
 
 
+def _ga4_section_aliases(section_fragment: str) -> list[str]:
+    if section_fragment == "/home":
+        return ["/home", "/reports/intelligenthome"]
+    return [section_fragment]
+
+
+def _ensure_expected_ga4_location(page, property_key: str, section_fragment: str, timeout: int = 15000) -> None:
+    expected_token = _ga4_property_token(property_key)
+    expected_sections = _ga4_section_aliases(section_fragment)
+    page.wait_for_function(
+        """
+        ({ expectedToken, expectedSections }) => {
+            const href = window.location.href;
+            return href.includes(expectedToken) && expectedSections.some(section => href.includes(section));
+        }
+        """,
+        arg={"expectedToken": expected_token, "expectedSections": expected_sections},
+        timeout=timeout,
+    )
+
+
 def _open_analytics_root(page) -> None:
     try:
         page.goto("https://analytics.google.com/analytics/web/", wait_until="domcontentloaded", timeout=30000)
@@ -246,6 +267,7 @@ def _switch_ga4_property_via_search(page, property_key: str):
 
 def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: int = 45000):
     expected_token = _ga4_property_token(property_key)
+    expected_sections = _ga4_section_aliases(section_fragment)
 
     last_error: Exception | None = None
     for attempt in range(1, 4):
@@ -266,9 +288,14 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
             except Exception:
                 page.goto(url, wait_until="load", timeout=timeout)
 
-            _ensure_expected_ga4_property(page, property_key, timeout=15000)
+            _ensure_expected_ga4_location(page, property_key, section_fragment, timeout=15000)
             page.wait_for_timeout(3000)
-            logger.info("GA4 navigation confirmed for property=%s current_url=%s", GA4_PROPERTIES[property_key], page.url)
+            logger.info(
+                "GA4 navigation confirmed for property=%s section=%s current_url=%s",
+                GA4_PROPERTIES[property_key],
+                section_fragment,
+                page.url,
+            )
             return page
         except Exception as exc:
             last_error = exc
@@ -289,7 +316,8 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
     current_url = page.url
     raise RuntimeError(
         f"Could not open the selected GA4 property for '{property_key}'. "
-        f"Expected URL containing '{expected_token}', but Analytics stayed on '{current_url}'."
+        f"Expected URL containing '{expected_token}' and one of {expected_sections}, "
+        f"but Analytics stayed on '{current_url}'."
     ) from last_error
 
 

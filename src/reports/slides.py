@@ -28,6 +28,41 @@ def _find_libreoffice() -> str | None:
     return None
 
 
+def render_pdf(report_id: int, pptx_path: Path) -> Path:
+    """
+    Convert a PPTX to a single PDF using LibreOffice headless.
+    Returns the path to the generated PDF file.
+    Raises RuntimeError if LibreOffice is not installed.
+    """
+    soffice = _find_libreoffice()
+    if not soffice:
+        raise RuntimeError(
+            "LibreOffice is not installed. Install it to enable slide preview. "
+            "On macOS: brew install --cask libreoffice"
+        )
+
+    slides_dir = get_slides_dir() / str(report_id)
+    slides_dir.mkdir(parents=True, exist_ok=True)
+
+    result = subprocess.run(
+        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(slides_dir), str(pptx_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"LibreOffice PDF conversion failed: {result.stderr}")
+
+    # LibreOffice outputs <stem>.pdf — rename to canonical preview.pdf
+    lo_output = slides_dir / f"{pptx_path.stem}.pdf"
+    canonical = slides_dir / "preview.pdf"
+    if lo_output.exists() and lo_output != canonical:
+        lo_output.rename(canonical)
+
+    logger.info("Rendered PDF for report_id=%s to %s", report_id, canonical)
+    return canonical
+
+
 def render_slides(report_id: int, pptx_path: Path) -> Path:
     """
     Convert a PPTX to PNG images using LibreOffice headless.
