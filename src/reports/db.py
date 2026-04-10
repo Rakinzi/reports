@@ -108,6 +108,23 @@ def update_report_stage(report_id: int, stage: str) -> None:
         conn.commit()
 
 
+def delete_report(report_id: int) -> bool:
+    """Delete a report record. Returns True if a row was deleted."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM reports WHERE id=?", (report_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def fail_orphaned_reports() -> None:
+    """Mark any pending reports as failed on startup — they lost their worker thread."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET status='failed', error='Interrupted: app was closed during generation' WHERE status='pending'"
+        )
+        conn.commit()
+
+
 def update_report_edits(report_id: int, edits: str) -> None:
     """edits is a JSON string of {field_id: new_text}."""
     with _connect() as conn:

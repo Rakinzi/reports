@@ -1,3 +1,4 @@
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from .db import (
     init_db, create_report, list_reports, get_report,
     update_report_completed, update_report_failed,
     update_report_slides_dir, update_report_edits, update_report_stage,
+    delete_report,
 )
 from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
 from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings
@@ -19,8 +21,18 @@ from .schemas import AppSettingsUpdate, GenerateReportRequest
 _executor = ThreadPoolExecutor(max_workers=1)
 logger = configure_logging()
 
+# Maps report_id -> Event; set the event to request cancellation.
+_cancel_flags: dict[int, threading.Event] = {}
+
 
 def _run_generate(report_id: int, report_name: str, date_range: str, report_date: str, start_date: str, end_date: str):
+    cancel_flag = _cancel_flags.get(report_id)
+
+    def stage_callback(stage: str) -> None:
+        if cancel_flag and cancel_flag.is_set():
+            raise InterruptedError("Report generation cancelled by user.")
+        update_report_stage(report_id, stage)
+
     try:
         from .generator_2026 import TEMPLATES_2026, generate_report_2026
         from .generator import generate_report
@@ -38,7 +50,7 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
             report_date=report_date,
             start_date=start_date,
             end_date=end_date,
-            _stage_callback=lambda stage: update_report_stage(report_id, stage),
+            _stage_callback=stage_callback,
         )
         update_report_stage(report_id, "Finalising report...")
         update_report_completed(report_id, str(output_path))
@@ -54,9 +66,14 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
             logger.info("Rendered PDF preview for report_id=%s pdf=%s", report_id, pdf_path)
         except Exception as render_err:
             logger.warning("PDF preview rendering failed for report_id=%s: %s", report_id, render_err)
+    except InterruptedError as e:
+        update_report_failed(report_id, str(e))
+        logger.info("Report generation cancelled for report_id=%s", report_id)
     except Exception as e:
         update_report_failed(report_id, str(e))
         logger.exception("Report generation failed for report_id=%s", report_id)
+    finally:
+        _cancel_flags.pop(report_id, None)
 
 app = FastAPI(title="Reports API")
 
@@ -72,6 +89,8 @@ app.add_middleware(
 def on_startup():
     load_runtime_environment()
     init_db()
+    from .db import fail_orphaned_reports
+    fail_orphaned_reports()
     logger.info("Reports API started. log_path=%s", get_log_path())
 
 
@@ -134,6 +153,7 @@ def post_generate_report(body: GenerateReportRequest):
         raise HTTPException(status_code=400, detail="Gemini API key is not configured")
 
     report_id = create_report(body.report_name, body.date_range, body.report_date)
+    _cancel_flags[report_id] = threading.Event()
     _executor.submit(
         _run_generate,
         report_id,
@@ -157,6 +177,34 @@ def get_report_by_id(report_id: int):
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     return JSONResponse(report)
+
+
+@app.post("/reports/{report_id}/cancel")
+def cancel_report(report_id: int):
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Report is not running")
+    flag = _cancel_flags.get(report_id)
+    if flag:
+        flag.set()
+    return JSONResponse({"id": report_id, "cancelled": True})
+
+
+@app.delete("/reports/{report_id}")
+def delete_report_by_id(report_id: int):
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] == "pending":
+        flag = _cancel_flags.get(report_id)
+        if flag:
+            flag.set()
+    deleted = delete_report(report_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return JSONResponse({"id": report_id, "deleted": True})
 
 
 def _resolve_report_path(stored: str) -> Path:

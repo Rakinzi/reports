@@ -97,20 +97,56 @@ GSC_URLS: dict[str, str] = {
 
 def _gemini_para(raw: str) -> str:
     """Paraphrase raw text via Gemini, returning the same approximate length."""
+    return _gemini_paras_batch([raw])[0]
+
+
+def _gemini_paras_batch(raws: list[str]) -> list[str]:
+    """Paraphrase multiple texts in a single Gemini call. Returns results in the same order."""
     load_runtime_environment()
-    word_count = len(raw.split())
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=(
-            f"Paraphrase the following for a professional PowerPoint report. "
-            f"Keep all numbers, percentages, and proper nouns exactly as they are. "
-            f"Use clear, formal business English. No em dashes, bullets, or markdown. "
-            f"Output must be approximately {word_count} words — do not shorten or expand. "
-            f"Output one plain paragraph only.\n\n" + raw
-        ),
+    if not raws:
+        return []
+    if len(raws) == 1:
+        word_count = len(raws[0].split())
+        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                f"Paraphrase the following for a professional PowerPoint report. "
+                f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+                f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+                f"Output must be approximately {word_count} words — do not shorten or expand. "
+                f"Output one plain paragraph only.\n\n" + raws[0]
+            ),
+        )
+        return [resp.text.strip()]
+
+    sections = "\n\n".join(
+        f"[{i + 1}] (~{len(r.split())} words)\n{r}" for i, r in enumerate(raws)
     )
-    return resp.text.strip()
+    prompt = (
+        f"Paraphrase each of the following {len(raws)} numbered texts for a professional PowerPoint report. "
+        f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+        f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+        f"Match each text's approximate word count. "
+        f"Output ONLY the paraphrased texts, each preceded by its number in the format [1], [2], etc. "
+        f"One plain paragraph per number. No other text.\n\n"
+        + sections
+    )
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    raw_output = resp.text.strip()
+
+    # Parse [1] ... [2] ... sections from the response
+    import re as _re
+    parts = _re.split(r"\[(\d+)\]", raw_output)
+    result_map: dict[int, str] = {}
+    for idx in range(1, len(parts), 2):
+        num = int(parts[idx])
+        text = parts[idx + 1].strip() if idx + 1 < len(parts) else ""
+        result_map[num] = text
+
+    # Fall back to original if parsing fails for any entry
+    return [result_map.get(i + 1, raws[i]) for i in range(len(raws))]
 
 
 def _write_para_with_highlights(para, text: str, bold_words: set[str] | None = None) -> None:
@@ -211,12 +247,13 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
         f"and long-term brand loyalty."
     )
 
+    subtitle, para0, para2 = _gemini_paras_batch([raw_subtitle, raw_para0, raw_para2])
     return {
         "active_users_short": active_users_short,
         "new_pct": new_pct,
-        "subtitle": _gemini_para(raw_subtitle),
-        "para0": _gemini_para(raw_para0),
-        "para2": _gemini_para(raw_para2),
+        "subtitle": subtitle,
+        "para0": para0,
+        "para2": para2,
     }
 
 
@@ -263,15 +300,10 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
         f"that users are spending enough time to review key information rather than exiting immediately."
     )
 
-    return (
-        _gemini_para(raw_subtitle),
-        _gemini_para(raw_para0),
-        _gemini_para(raw_para2),
-        _gemini_para(raw_para4),
-    )
+    return tuple(_gemini_paras_batch([raw_subtitle, raw_para0, raw_para2, raw_para4]))
 
 
-def _geo_paras(countries_data: list[dict]) -> tuple[str, str, str, str]:
+def _geo_paras(countries_data: list[dict], raw_subtitle: str | None = None) -> tuple:
     """Slide 4 — returns 4 Gemini-paraphrased narrative paragraphs from real country data."""
     total_users = sum(r["users"] for r in countries_data) or 1
     sorted_rows = sorted(countries_data, key=lambda r: r["users"], reverse=True)
@@ -326,12 +358,8 @@ def _geo_paras(countries_data: list[dict]) -> tuple[str, str, str, str]:
         f"show strong engagement depth and potential conversion value."
     )
 
-    return (
-        _gemini_para(raw0),
-        _gemini_para(raw1),
-        _gemini_para(raw2),
-        _gemini_para(raw3),
-    )
+    raws = ([raw_subtitle] if raw_subtitle else []) + [raw0, raw1, raw2, raw3]
+    return tuple(_gemini_paras_batch(raws))
 
 
 _PAGE_COMPLIANCE_KEYWORDS = (
@@ -513,12 +541,7 @@ def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple
             f"and consistent user flow across key content areas."
         )
 
-    return (
-        _gemini_para(raw_heading),
-        _gemini_para(raw_para1),
-        _gemini_para(raw_para2),
-        _gemini_para(raw_para3),
-    )
+    return tuple(_gemini_paras_batch([raw_heading, raw_para1, raw_para2, raw_para3]))
 
 
 # ---------------------------------------------------------------------------
@@ -1035,12 +1058,9 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
         sorted_rows = sorted(countries_data, key=lambda r: r["users"], reverse=True)
         top = sorted_rows[0]
 
-        # Subtitle in object 2, para[1]
+        # Subtitle + 4 narrative paragraphs — all batched in one Gemini call via _geo_paras
         raw_subtitle = f"{top['country']} Dominance with International Opportunity"
-        subtitle = _gemini_para(raw_subtitle)
-
-        # 4 narrative paragraphs from real data
-        para0, para1, para2, para3 = _geo_paras(countries_data)
+        subtitle, para0, para1, para2, para3 = _geo_paras(countries_data, raw_subtitle=raw_subtitle)
         narratives = [para0, para1, para2, para3]
 
         # Country names to bold in narratives
@@ -1160,14 +1180,7 @@ def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
         f"indicating consistent search demand and sustained visibility."
     )
 
-    return (
-        _gemini_para(subtitle_raw),
-        _gemini_para(raw_para0),
-        _gemini_para(raw_para1),
-        _gemini_para(raw_para2),
-        # para3 kept short — same token count
-        _gemini_para(raw_para3),
-    )
+    return tuple(_gemini_paras_batch([subtitle_raw, raw_para0, raw_para1, raw_para2, raw_para3]))
 
 
 def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
@@ -1295,14 +1308,16 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.wait_for_timeout(1000)
     start_input = page.get_by_label("Start date")
     start_input.wait_for(state="visible", timeout=10000)
-    start_input.click()
-    start_input.select_text()
+    start_input.triple_click()
+    page.keyboard.press("Control+a")
+    page.wait_for_timeout(200)
     start_input.fill(start_date)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
     end_input = page.get_by_label("End date")
-    end_input.click()
-    end_input.select_text()
+    end_input.triple_click()
+    page.keyboard.press("Control+a")
+    page.wait_for_timeout(200)
     end_input.fill(end_date)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
@@ -2095,36 +2110,36 @@ def _build_recommendations_slide(
     prev_ga4_metrics: dict | None = None,
     website_pages: dict | None = None,
 ) -> None:
-    """Replace recommendations on slide 7 (object 7) with Gemini-generated content."""
-    recs = _generate_recommendations_2026(
-        report_name, home_metrics, snapshot_metrics, search_metrics, pages_data, countries_data, date_range,
-        prev_ga4_metrics=prev_ga4_metrics, website_pages=website_pages,
-    )
-    if not recs:
-        return
+    """Write placeholder text on the recommendations slide for manual completion."""
+    placeholders = [
+        ("Recommendation 1", [
+            "Add your first recommendation here.",
+            "Supporting point for recommendation 1.",
+            "Supporting point for recommendation 1.",
+        ]),
+        ("2. Recommendation 2", [
+            "Add your second recommendation here.",
+            "Supporting point for recommendation 2.",
+            "Supporting point for recommendation 2.",
+        ]),
+        ("3. Recommendation 3", [
+            "Add your third recommendation here.",
+            "Supporting point for recommendation 3.",
+            "Supporting point for recommendation 3.",
+        ]),
+    ]
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
 
-        # object 3 — subtitle: "Three Key Initiatives to Enhance Performance"
         if shape.name == "object 3":
             content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
             if content_paras:
                 _fill_text_run(content_paras[0], "Three Key Initiatives to Enhance Performance")
 
-        # object 7 — main content block
-        # Template structure (para indices):
-        #   [0]       bold, no number  → rec 1 title
-        #   [1..5]    body+bullets     → rec 1 (5 lines)
-        #   [6]       bold, "2. ..."   → rec 2 title
-        #   [7..10]   body+bullets     → rec 2 (4 lines)
-        #   [11]      bold, "3. ..."   → rec 3 title
-        #   [12..14]  body+bullets     → rec 3 (3 lines)
         elif shape.name == "object 7":
             paras = shape.text_frame.paragraphs
-            # Map: (para_index, rec_index, line_role)
-            # line_role: "title" | "bullet_N"
             layout = [
                 (0,  0, "title"),
                 (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
@@ -2136,18 +2151,18 @@ def _build_recommendations_slide(
                 (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
             ]
             for para_idx, rec_idx, role in layout:
-                if para_idx >= len(paras) or rec_idx >= len(recs):
+                if para_idx >= len(paras) or rec_idx >= len(placeholders):
                     continue
-                rec = recs[rec_idx]
+                title, bullets = placeholders[rec_idx]
                 para = paras[para_idx]
                 if role == "title":
-                    prefix = "" if rec_idx == 0 else f"{rec_idx + 1}. "
-                    _fill_text_run(para, f"{prefix}{rec['title']}")
+                    _fill_text_run(para, title)
                 else:
                     bullet_n = int(role.split("_")[1])
-                    bullets = rec.get("bullets", [])
                     if bullet_n < len(bullets):
                         _fill_text_run(para, bullets[bullet_n])
+                    else:
+                        _fill_text_run(para, "")
 
 
 # ---------------------------------------------------------------------------
@@ -2188,19 +2203,25 @@ def generate_report_2026(
     perf_month = _performance_month(date_range)
 
     # Step 3: Build each slide
-    _stage("Building slides...")
     logger.info("[2026] Building slides for %s (%d slides)", report_name, slide_count)
 
+    _stage("Building slide 1 up to complete...")
     _build_slide1(prs.slides[0], perf_month, screenshots)
+    _stage("Building slide 2 up to complete...")
     _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
+    _stage("Building slide 3 up to complete...")
     _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
+    _stage("Building slide 4 up to complete...")
     _build_slide4(prs.slides[3], countries_data, screenshots)
+    _stage("Building slide 5 up to complete...")
     _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views)
 
     if not is_7_slide and slide_count >= 8:
+        _stage("Building slide 6 up to complete...")
         _build_slide6(prs.slides[5], search_metrics, screenshots)
 
     rec_slide_idx = slide_count - 2
+    _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
     _build_recommendations_slide(
         prs.slides[rec_slide_idx],
         report_name, home_metrics, snapshot_metrics, search_metrics,
