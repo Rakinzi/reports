@@ -32,9 +32,11 @@
 
 	let saving = $state(false);
 	let saveError = $state('');
-	let pdfAvailable = $state(false);
+	let pdfLoading = $state(true);
+	let pdfError = $state(false);
+	let pdfCacheBust = $state(Date.now());
 
-	const pdfUrl = $derived(`${apiBaseUrl}/reports/${reportId}/preview.pdf`);
+	const pdfUrl = $derived(`${apiBaseUrl}/reports/${reportId}/preview.pdf?v=${pdfCacheBust}`);
 
 	function initEdits(slides: Slide[]) {
 		const vals: Record<string, string> = {};
@@ -56,9 +58,8 @@
 			report = await fetchJson<Report>(apiBaseUrl, `/reports/${reportId}`);
 			slides = await fetchSlides(apiBaseUrl, reportId);
 			initEdits(slides);
-			// Check if PDF preview is available
-			const pdfCheck = await fetch(`${apiBaseUrl}/reports/${reportId}/preview.pdf`, { method: 'HEAD' });
-			pdfAvailable = pdfCheck.ok;
+			pdfLoading = true;
+			pdfError = false;
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load report';
 		} finally {
@@ -92,9 +93,10 @@
 		try {
 			await applyEdits(apiBaseUrl, reportId, editedValues);
 			slides = await fetchSlides(apiBaseUrl, reportId);
-			// Re-check PDF (apply-edits triggers a re-render server-side)
-			const pdfCheck = await fetch(`${apiBaseUrl}/reports/${reportId}/preview.pdf`, { method: 'HEAD' });
-			pdfAvailable = pdfCheck.ok;
+			// Reset PDF state and bust cache to reload the iframe
+			pdfError = false;
+			pdfLoading = true;
+			pdfCacheBust = Date.now();
 
 			const suggestedName = `${report?.report_name ?? 'report'}-edited.pptx`;
 			if (isTauri) {
@@ -115,9 +117,9 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-between border-b border-zinc-800 px-6 py-4">
+	<div class="flex items-center justify-between border-b border-border px-6 py-4">
 		<button
-			class="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-100"
+			class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"
 			onclick={() => goto('/')}
 		>
 			<ArrowLeft class="h-4 w-4" />
@@ -125,11 +127,10 @@
 		</button>
 		<div class="flex items-center gap-3">
 			{#if saveError}
-				<span class="text-xs text-red-400">{saveError}</span>
+				<span class="text-xs text-red-500">{saveError}</span>
 			{/if}
 			<Button
 				size="sm"
-				class="bg-zinc-100 font-semibold text-zinc-900 hover:bg-zinc-200"
 				onclick={handleSaveAndExport}
 				disabled={saving || loading}
 			>
@@ -145,30 +146,38 @@
 
 	{#if loading}
 		<div class="flex flex-1 items-center justify-center">
-			<div class="flex items-center gap-3 text-sm text-zinc-400">
+			<div class="flex items-center gap-3 text-sm text-muted-foreground">
 				<Loader2 class="h-4 w-4 animate-spin" />
 				Loading slides...
 			</div>
 		</div>
 	{:else if error}
 		<div class="flex flex-1 items-center justify-center">
-			<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+			<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-5 py-4 text-sm text-red-600 dark:text-red-300">
 				{error}
 			</div>
 		</div>
 	{:else}
 		<div class="flex flex-1 overflow-hidden">
-			<div class="flex w-[60%] flex-col border-r border-zinc-800 bg-zinc-950">
-				{#if pdfAvailable}
+			<div class="flex w-[60%] flex-col border-r border-border bg-muted/20 relative">
+				{#if pdfError}
+					<div class="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+						<p class="text-sm">Slide preview unavailable</p>
+					</div>
+				{:else}
+					{#if pdfLoading}
+						<div class="absolute inset-0 flex items-center justify-center gap-3 text-muted-foreground bg-muted/20 z-10">
+							<Loader2 class="h-4 w-4 animate-spin" />
+							<p class="text-sm">Loading preview...</p>
+						</div>
+					{/if}
 					<iframe
 						src={pdfUrl}
 						title="Report Preview"
 						class="flex-1 w-full border-none"
+						onload={() => { pdfLoading = false; }}
+						onerror={() => { pdfLoading = false; pdfError = true; }}
 					></iframe>
-				{:else}
-					<div class="flex flex-1 flex-col items-center justify-center gap-3 text-zinc-600">
-						<p class="text-sm">Slide preview unavailable</p>
-					</div>
 				{/if}
 			</div>
 
@@ -177,15 +186,15 @@
 					<div class="space-y-8">
 						{#each slides.filter(s => s.fields.length > 0) as slide (slide.slide_index)}
 							<div>
-								<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+								<h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 									Slide {slide.slide_index + 1}
 								</h2>
 								<div class="space-y-5">
 									{#each slide.fields as field (field.field_id)}
 										<div class="space-y-2">
-											<Label class="text-xs font-medium text-zinc-400">{field.label}</Label>
+											<Label class="text-xs font-medium text-muted-foreground">{field.label}</Label>
 											<textarea
-												class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 resize-none"
+												class="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
 												rows={editedValues[field.field_id]?.length > 100 ? 5 : 2}
 												bind:value={editedValues[field.field_id]}
 											></textarea>
@@ -193,13 +202,13 @@
 												<input
 													type="text"
 													placeholder="e.g. make it shorter, focus on new users"
-													class="flex-1 rounded-md border border-zinc-700 bg-zinc-800/50 px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+													class="flex-1 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
 													bind:value={instructions[field.field_id]}
 												/>
 												<Button
 													size="sm"
 													variant="outline"
-													class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 text-xs"
+													class="text-xs"
 													onclick={() => handleRewrite(field)}
 													disabled={rewriting[field.field_id]}
 												>
@@ -218,7 +227,7 @@
 						{/each}
 					</div>
 				{:else}
-					<div class="flex flex-1 items-center justify-center text-sm text-zinc-600">
+					<div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
 						No editable fields found.
 					</div>
 				{/if}
