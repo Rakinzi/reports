@@ -6,6 +6,7 @@ Called by app.py when the requested report name is in TEMPLATES_2026.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from copy import deepcopy
@@ -445,121 +446,161 @@ def _short_title(title: str) -> str:
     return title
 
 
+def _switch_dimension_to_page_path(page) -> None:
+    selectors = [
+        "th.cdk-column-ROW_HEADER-unifiedScreenClass-primaryDimensionColumn button[data-guidedhelpid='table-dimension-picker']",
+        "button[data-guidedhelpid='table-dimension-picker']",
+    ]
+    last_error: Exception | None = None
+
+    for selector in selectors:
+        try:
+            button = page.locator(selector).first
+            button.wait_for(state="visible", timeout=8000)
+            button.click()
+            page.wait_for_timeout(1500)
+            break
+        except Exception as exc:
+            last_error = exc
+    else:
+        raise RuntimeError("Could not open the GA4 dimension picker") from last_error
+
+    option_queries = [
+        lambda: page.get_by_role("menuitem").filter(has_text="Page path").first,
+        lambda: page.locator("button.mat-mdc-menu-item").filter(has_text="Page path").first,
+        lambda: page.locator("[role='menuitem']").filter(has_text="Page path").first,
+        lambda: page.locator("mat-option, .mat-mdc-option").filter(has_text="Page path").first,
+        lambda: page.get_by_text("Page path and screen class").first,
+    ]
+    for query in option_queries:
+        try:
+            option = query()
+            option.wait_for(state="visible", timeout=5000)
+            option.click()
+            page.wait_for_timeout(3000)
+            page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+            return
+        except Exception:
+            continue
+
+    raise RuntimeError("Could not switch the GA4 table dimension to 'Page path and screen class'")
+
+
+def _fallback_page_label(path_value: str) -> str:
+    clean = path_value.strip() or "/"
+    if clean == "/":
+        return "Homepage"
+    clean = clean.split("?", 1)[0].split("#", 1)[0].strip("/")
+    if not clean:
+        return "Homepage"
+
+    parts = [part for part in clean.split("/") if part]
+    last = parts[-1].replace("-", " ").replace("_", " ").strip()
+    if not last:
+        return "Homepage"
+    words = [word for word in last.split() if word]
+    return " ".join(word.upper() if word.isupper() else word.capitalize() for word in words[:5])
+
+
+def _label_page_paths_with_gemini(pages_data: list[dict]) -> None:
+    if not pages_data:
+        return
+
+    load_runtime_environment()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        for row in pages_data:
+            row["title"] = _fallback_page_label(row.get("path", row["title"]))
+        return
+
+    client = genai.Client(api_key=api_key)
+    path_list = "\n".join(f"- {row.get('path', row['title'])}" for row in pages_data)
+    prompt = (
+        "You are labeling website page paths for a PowerPoint report.\n"
+        "Return strict JSON only: an array of objects with keys path and label.\n"
+        "Rules:\n"
+        "- label must be 2 to 5 words\n"
+        "- use title case\n"
+        "- make each label human-friendly\n"
+        "- keep important brand/product names when obvious\n"
+        "- '/' should become 'Homepage'\n"
+        "- do not include commentary or markdown\n\n"
+        f"Paths:\n{path_list}"
+    )
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        raw = (response.text or "").strip()
+        mappings = json.loads(raw)
+        by_path = {
+            item["path"]: item["label"].strip()
+            for item in mappings
+            if isinstance(item, dict) and item.get("path") and item.get("label")
+        }
+        for row in pages_data:
+            path_value = row.get("path", row["title"])
+            row["title"] = by_path.get(path_value, _fallback_page_label(path_value))
+    except Exception:
+        for row in pages_data:
+            row["title"] = _fallback_page_label(row.get("path", row["title"]))
+
+
 def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple[str, str, str, str]:
-    """Slide 5 — heading + 3 Gemini-paraphrased narrative paragraphs from real page data."""
+    """Slide 5 — heading + 3 narrative paragraphs from real page data."""
     if not pages_data:
         return ("", "", "", "")
 
-    # Use the real site-wide total if available, else fall back to sum of top 10
-    total_views = site_total_views if site_total_views > 0 else (sum(p["views"] for p in pages_data) or 1)
-
-    # Annotate each page with its classification and clean label
     for p in pages_data:
         p["_type"] = _classify_page(p["title"])
         raw_label = _short_title(p["title"])
-        # Home pages always get a friendly label regardless of brand name
         p["_label"] = "Homepage" if p["_type"] == "home" else raw_label
 
     top = pages_data[0]
-    top_pct = round(top["views"] / total_views * 100, 1)
-
-    # Homepage — find it regardless of position
-    homepage = next((p for p in pages_data if p["_type"] == "home"), None)
-
-    # Product pages — high commercial intent
-    product_pages = [p for p in pages_data if p["_type"] == "product"]
-
-    # Compliance pages (T&Cs etc.)
+    second = pages_data[1] if len(pages_data) > 1 else None
     compliance_pages = [p for p in pages_data if p["_type"] == "compliance"]
-
-    # Support pages
     support_pages = [p for p in pages_data if p["_type"] == "support"]
 
-    # --- Heading ---
-    if homepage and homepage != top:
-        raw_heading = (
-            f"The {top['_label']} and {homepage['_label']} pages drive the most meaningful engagement."
-        )
-    else:
-        second = pages_data[1] if len(pages_data) > 1 else None
-        raw_heading = (
-            f"The {top['_label']}"
-            + (f" and {second['_label']}" if second else "")
-            + " pages drive the most meaningful engagement."
-        )
+    raw_heading = (
+        f"The {top['_label']}"
+        + (f" and {second['_label']}" if second else "")
+        + " pages drive the most meaningful engagement."
+    )
 
-    # --- Para 1: top page + homepage context ---
-    # "Homepage" already implies "page" — avoid "The Homepage page"
     top_label_display = top['_label'] if top['_label'] != "Homepage" else "Homepage"
     page_suffix = "" if top['_label'] == "Homepage" else " page"
     raw_para1 = (
         f"The {top_label_display}{page_suffix} drives the highest traffic, accounting for "
-        f"{top_pct}% of total views ({top['views']:,} views) with {top['views_per_user']} views per active user "
-        f"and an average engagement time of {top['avg_engagement_time']}. "
+        f"{top.get('views_pct') or '0%'} of total views ({top['views']:,} views), with "
+        f"{top['views_per_user']} views per active user and an average engagement duration of "
+        f"{top['avg_engagement_time']}. This substantial volume indicates strong content discoverability and user interest."
     )
-    if top["_type"] == "compliance":
-        raw_para1 += (
-            "As a compliance or legal page, this high volume reflects strong paid media efforts "
-            "directing users to read terms before proceeding, though lower repeat visits are expected."
-        )
-    elif homepage and homepage != top:
-        h_pct = round(homepage["views"] / total_views * 100, 1)
-        raw_para1 += (
-            f"The Homepage remains a key entry point with {homepage['views']:,} views ({h_pct}% of total), "
-            f"reinforcing its role as the central navigation hub."
+
+    if compliance_pages:
+        c_parts = [f"{p['_label']} ({p.get('views_pct') or '0%'} of views)" for p in compliance_pages[:2]]
+        raw_para2 = (
+            f"Compliance pages, including {' and '.join(c_parts)}, yield considerable traffic, "
+            f"predominantly influenced by campaign landing directives over organic browsing."
         )
     else:
-        raw_para1 += "This strong volume reflects effective discoverability and user interest in the content."
-
-    # --- Para 2: product pages with browsing depth ---
-    if product_pages:
-        deep = sorted(product_pages, key=lambda p: float(p["views_per_user"]), reverse=True)[:3]
-        deep_parts = [f"{p['_label']} ({p['views_per_user']} views per user)" for p in deep]
         raw_para2 = (
-            f"Product-driven pages such as {', '.join(deep_parts)} demonstrate stronger browsing intent, "
-            f"indicating commercial interest and higher engagement quality from users actively exploring offerings."
+            f"Secondary pages such as {second['_label'] if second else 'other pages'} contribute meaningful traffic, "
+            f"but with more limited evidence of deep exploratory browsing."
         )
-    elif compliance_pages:
-        c_parts = [f"{p['_label']} ({round(p['views']/total_views*100,1)}% of views)" for p in compliance_pages[:2]]
-        raw_para2 = (
-            f"Compliance pages including {' and '.join(c_parts)} generate substantial traffic, "
-            f"typically driven by campaign landing requirements rather than organic browsing intent."
-        )
-    else:
-        second = pages_data[1] if len(pages_data) > 1 else None
-        if second:
-            s_pct = round(second["views"] / total_views * 100, 1)
-            raw_para2 = (
-                f"The {second['_label']} page accounts for {s_pct}% of total views "
-                f"with {second['views_per_user']} views per user, contributing steady secondary traffic."
-            )
-        else:
-            raw_para2 = "Secondary pages contribute consistent traffic volumes across the site."
 
-    # --- Para 3: support / low-depth pages or overall observation ---
     if support_pages:
         s_parts = [p["_label"] for p in support_pages[:2]]
         raw_para3 = (
-            f"Support-oriented pages such as {' and '.join(s_parts)} contribute steady traffic "
-            f"but are not primary drivers of repeat interaction or deep browsing behaviour."
-        )
-    elif compliance_pages and product_pages:
-        c_views = sum(p["views"] for p in compliance_pages)
-        c_pct = round(c_views / total_views * 100, 1)
-        best_product = max(product_pages, key=lambda p: float(p["views_per_user"]))
-        raw_para3 = (
-            f"Compliance pages collectively account for {c_pct}% of total views, driven primarily "
-            f"by campaign traffic rather than organic intent. In contrast, product pages such as "
-            f"{best_product['_label']} ({best_product['views_per_user']} views per user) show "
-            f"stronger browsing depth, signalling genuine commercial interest worth nurturing."
+            f"Support-focused pages including {' and '.join(s_parts)} attract consistent traffic "
+            f"but exhibit lower engagement depth, indicating they are mainly used for quick access to assistance rather than extended browsing."
         )
     else:
         raw_para3 = (
-            f"Overall, the site demonstrates a healthy page distribution with clear entry points "
-            f"and consistent user flow across key content areas."
+            f"The leading pages drive visibility and entry traffic, while the remaining pages play a more supportive role in the user journey."
         )
 
-    return tuple(_gemini_paras_batch([raw_heading, raw_para1, raw_para2, raw_para3]))
+    return raw_heading, raw_para1, raw_para2, raw_para3
 
 
 # ---------------------------------------------------------------------------
@@ -877,14 +918,16 @@ def capture_2026(
                 _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
                 end_col = page.locator("th.cdk-column-DEFAULT-userEngagementDurationPerUser").first
+                table = page.locator("table.adv-table").first
                 row_num_col.wait_for(state="visible", timeout=10000)
                 page.keyboard.press("End")
                 page.wait_for_timeout(1000)
                 page.mouse.wheel(0, 3000)
                 page.wait_for_timeout(1000)
+                _switch_dimension_to_page_path(page)
                 start_box = row_num_col.bounding_box()
                 end_box = end_col.bounding_box()
-                table_box = page.locator("table.adv-table").bounding_box()
+                table_box = table.bounding_box()
                 clip = {
                     "x": start_box["x"],
                     "y": table_box["y"],
@@ -895,31 +938,8 @@ def capture_2026(
                 page.screenshot(path=str(path), clip=clip, full_page=True)
                 screenshots["pages_table"] = path
 
-                body = page.locator("body").inner_text()
-                import re as _re
-                # Scrape total views from the "Total" summary row first:
-                # "\tTotal\t58,165\n100% of total\t..."
-                total_m = _re.search(r"\tTotal\t([\d,]+)\n", body)
-                if total_m:
-                    site_total_views = int(total_m.group(1).replace(",", ""))
-                # Row format: "\t1\tPage Title\t9,053 (15.56%)\t5,913 (21.94%)\t1.53\t32s\t..."
-                for line in body.splitlines():
-                    m = _re.match(
-                        r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+)\t(\S+)",
-                        line,
-                    )
-                    if m and len(pages_data) < 10:
-                        title = m.group(1).strip()
-                        pages_data.append({
-                            "title": title,
-                            "views": int(m.group(2).replace(",", "")),
-                            "active_users": int(m.group(3).replace(",", "")),
-                            "views_per_user": m.group(4),
-                            "avg_engagement_time": m.group(5),
-                        })
-                        # Keep simple page_views dict for backward compat
-                        if len(page_views) < 4:
-                            page_views[title] = int(m.group(2).replace(",", ""))
+                page_views, pages_data, site_total_views = _scrape_pages_table(page)
+                _label_page_paths_with_gemini(pages_data)
             except Exception:
                 pass
 
@@ -1470,29 +1490,43 @@ def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
     pages_data: list[dict] = []
     site_total_views = 0
 
-    import re as _re
-
     body = page.locator("body").inner_text()
-    total_m = _re.search(r"\tTotal\t([\d,]+)\n", body)
-    if total_m:
-        site_total_views = int(total_m.group(1).replace(",", ""))
+    total_match = re.search(r"(?:^|\n)\s*Total\s*\n\s*([\d,]+)\s*\n\s*100% of total", body)
+    if total_match:
+        try:
+            site_total_views = int(total_match.group(1).replace(",", ""))
+        except ValueError:
+            site_total_views = 0
 
     for line in body.splitlines():
-        m = _re.match(
-            r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+)\t(\S+)",
-            line,
-        )
-        if m and len(pages_data) < 10:
-            title = m.group(1).strip()
+        cols = [col.strip() for col in line.split("\t") if col.strip()]
+        if not cols or len(cols) < 5 or not cols[0].isdigit() or len(pages_data) >= 10:
+            continue
+
+        title = cols[1]
+        views_match = re.match(r"^([\d,]+)", cols[2])
+        active_users_match = re.match(r"^([\d,]+)", cols[3])
+        views_pct_match = re.search(r"\(([^)]+%)\)", cols[2])
+        active_users_pct_match = re.search(r"\(([^)]+%)\)", cols[3])
+        if not views_match or not active_users_match:
+            continue
+
+        try:
+            views = int(views_match.group(1).replace(",", ""))
             pages_data.append({
                 "title": title,
-                "views": int(m.group(2).replace(",", "")),
-                "active_users": int(m.group(3).replace(",", "")),
-                "views_per_user": m.group(4),
-                "avg_engagement_time": m.group(5),
+                "path": title,
+                "views": views,
+                "views_pct": views_pct_match.group(1) if views_pct_match else "",
+                "active_users": int(active_users_match.group(1).replace(",", "")),
+                "active_users_pct": active_users_pct_match.group(1) if active_users_pct_match else "",
+                "views_per_user": cols[4],
+                "avg_engagement_time": cols[5] if len(cols) > 5 else "",
             })
             if len(page_views) < 4:
-                page_views[title] = int(m.group(2).replace(",", ""))
+                page_views[title] = views
+        except ValueError:
+            continue
 
     return page_views, pages_data, site_total_views
 
