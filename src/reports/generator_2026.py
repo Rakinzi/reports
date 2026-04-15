@@ -228,13 +228,19 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
     except (ValueError, TypeError, ZeroDivisionError):
         new_pct = "N/A"
 
+    new_user_summary = (
+        f"of which {new_users} ({new_pct}) were new visitors"
+        if new_pct != "N/A"
+        else f"of which {new_users} were new visitors"
+    )
+
     # Subtitle — same word count as template
     raw_subtitle = f"Performance Overview: {new_pct} of users are first-time visitors"
 
     # Para 0 — active users + new visitors count + new visitor %
     raw_para0 = (
         f"The {brand} website delivered solid overall performance during the period under review, "
-        f"attracting {active_users} active users, of which {new_users} ({new_pct}) were new visitors. "
+        f"attracting {active_users} active users, {new_user_summary}. "
         f"This strong proportion of first-time users reflects effective audience acquisition "
         f"and sustained brand visibility across digital channels."
     )
@@ -299,10 +305,15 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
     # Subtitle — "User Engagement Metrics: 34K Strong Active User Baseline"
     raw_subtitle = f"User Engagement Metrics: {active_users} Strong Active User Baseline"
 
+    if new_pct != "N/A":
+        new_user_clause = f"Of these, {new_users} users ({new_pct}) were new visitors"
+    else:
+        new_user_clause = f"Of these, {new_users} users were new visitors"
+
     raw_para0 = (
         f"The reporting period reflects solid and encouraging performance for the {brand} website, "
         f"with a total of {active_users} active users recorded during the period. "
-        f"Of these, {new_users} users ({new_pct}) were new visitors, highlighting continued strong "
+        f"{new_user_clause}, highlighting continued strong "
         f"brand discovery and the effectiveness of current reach and awareness initiatives."
     )
 
@@ -1124,7 +1135,8 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             if len(paras) > 0 and paras[0].text.strip():
                 _fill_text_run(paras[0], str(new_users))
             if len(paras) > 1 and paras[1].text.strip():
-                _fill_text_run(paras[1], f"New Users ({new_pct})")
+                label = f"New Users ({new_pct})" if new_pct != "N/A" else "New Users"
+                _fill_text_run(paras[1], label)
             continue
 
         if shape.name == "object 14":
