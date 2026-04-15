@@ -4,6 +4,7 @@ import os
 import threading
 
 from .logging_utils import configure_logging
+from .browser_support import build_launch_prefs
 from .runtime import (
     get_managed_chrome_profile_directory,
     get_managed_chrome_user_data_dir,
@@ -34,23 +35,26 @@ def _auth_worker(target_url: str) -> None:
         closed = threading.Event()
 
         with sync_playwright() as playwright:
-            try:
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=chrome_user_data_dir,
-                    channel="chrome",
-                    headless=False,
-                    args=launch_args,
-                    ignore_default_args=["--enable-automation"],
-                    viewport={"width": 1920, "height": 1080},
-                )
-            except Exception:
-                context = playwright.chromium.launch_persistent_context(
-                    user_data_dir=chrome_user_data_dir,
-                    headless=False,
-                    args=launch_args,
-                    ignore_default_args=["--enable-automation"],
-                    viewport={"width": 1920, "height": 1080},
-                )
+            last_error: Exception | None = None
+            context = None
+            for launch_pref in build_launch_prefs():
+                try:
+                    context = playwright.chromium.launch_persistent_context(
+                        user_data_dir=chrome_user_data_dir,
+                        headless=False,
+                        args=launch_args,
+                        ignore_default_args=["--enable-automation"],
+                        viewport={"width": 1920, "height": 1080},
+                        **launch_pref,
+                    )
+                    logger.info("Opened managed browser session using %s", launch_pref or {"playwright": "bundled"})
+                    break
+                except Exception as exc:
+                    last_error = exc
+            if context is None:
+                raise RuntimeError(
+                    "Could not launch a compatible Chromium browser. Install Google Chrome, Microsoft Edge, or Chromium."
+                ) from last_error
 
             page = context.pages[0] if context.pages else context.new_page()
             context.on("close", lambda *_args: closed.set())

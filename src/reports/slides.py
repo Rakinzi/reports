@@ -28,6 +28,9 @@ _EMU_PER_INCH = 914400
 
 # Fallback font search order
 _FONT_CANDIDATES = [
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/calibri.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
     "/System/Library/Fonts/Helvetica.ttc",
     "/System/Library/Fonts/SFNS.ttf",
     "/Library/Fonts/Arial.ttf",
@@ -389,6 +392,62 @@ def _label_for_field(slide_idx: int, shape_name: str, text: str) -> str | None:
         return f"Recommendation {text[0]}"
 
     return None
+
+
+def extract_all_shapes(pptx_path: Path) -> list[dict]:
+    """
+    Extract ALL shapes from every slide (text + picture) without filtering.
+    Used for the template mapping UI so the user can assign field types to each shape.
+    Returns a flat list sorted by slide_index, then top/left position.
+    """
+    prs = Presentation(str(pptx_path))
+    result = []
+
+    for slide_idx, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                continue  # skip groups — leaf shapes are what matter for mapping
+
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                shape_type = "image"
+                placeholder_text = ""
+            elif shape.has_text_frame:
+                shape_type = "text"
+                placeholder_text = shape.text_frame.text[:120].strip()
+            else:
+                continue  # connector, table, etc. — not mappable
+
+            result.append({
+                "slide_index": slide_idx,
+                "shape_name": shape.name,
+                "shape_type": shape_type,
+                "placeholder_text": placeholder_text,
+                "left_emu": shape.left,
+                "top_emu": shape.top,
+                "width_emu": shape.width,
+                "height_emu": shape.height,
+            })
+
+    return result
+
+
+def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
+    """
+    Render all slides of a PPTX to PNG files in target_dir.
+    Unlike render_slides(), writes to an explicit directory — used for template previews
+    so they don't collide with the report-id namespace.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    prs = Presentation(str(pptx_path))
+    slide_w = _emu_to_px(prs.slide_width)
+    slide_h = _emu_to_px(prs.slide_height)
+    scheme_colors = _resolve_scheme_colors(prs)
+
+    for i, slide in enumerate(prs.slides):
+        img = _render_slide(slide, slide_w, slide_h, scheme_colors)
+        img.save(str(target_dir / f"slide_{i}.png"), "PNG")
+
+    logger.info("Rendered %d slides for template to %s", len(prs.slides), target_dir)
 
 
 def apply_field_edits(pptx_path: Path, edits: dict[str, str], output_path: Path) -> None:

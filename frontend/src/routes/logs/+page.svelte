@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import { Activity, FileText, Loader2, RefreshCw } from '@lucide/svelte';
+	import Document from '$lib/illustrations/Document.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { fetchJson, resolveBackendContext, type LogResponse, waitForBackend } from '$lib/backend';
@@ -134,6 +135,9 @@
 							<div class="mt-2 text-sm text-foreground">
 								{autoScroll ? 'On — scroll up to pause' : 'Paused — scroll to bottom to resume'}
 							</div>
+						</div>
+						<div class="flex justify-center pt-2 pb-1">
+							<Document class="h-24 w-24 text-muted-foreground/20" />
 						</div>
 					</CardContent>
 				</Card>

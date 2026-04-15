@@ -15,10 +15,10 @@ The desktop app starts the bundled Python API locally and stores runtime data in
 The app requires:
 
 - a Gemini API key
-- a Chrome user data directory that already contains a profile signed into Google Analytics
-- the Chrome profile directory name, such as `Default` or `Profile 1`
+- a locally installed Chromium-based browser: Google Chrome, Microsoft Edge, or Chromium
+- signing into Google Analytics once through the app-managed browser session
 
-These values are saved locally by the backend in the app-data directory.
+The app stores its own managed browser profile and other runtime data in the OS app-data directory.
 
 ## Building Installers
 

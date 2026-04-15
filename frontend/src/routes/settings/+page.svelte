@@ -2,11 +2,14 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ArrowLeft, KeyRound, Loader2, Save, ShieldCheck } from '@lucide/svelte';
+	import Auth from '$lib/illustrations/Auth.svelte';
+	import Session from '$lib/illustrations/Session.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import BrowserInstallHelp from '$lib/components/BrowserInstallHelp.svelte';
 	import {
 		fetchJson,
 		resolveBackendContext,
@@ -23,6 +26,8 @@
 	let settings = $state<SettingsState>({
 		configured: false,
 		gemini_api_key_set: false,
+		browser_available: false,
+		browser_path: '',
 		chrome_user_data_dir: '',
 		chrome_profile_directory: 'Default',
 		chrome_profile_label: 'App Google Session',
@@ -88,9 +93,9 @@
 				method: 'POST'
 			});
 			pageMessage =
-				'Chrome opened. Sign in to Google and confirm you can access GA4, then close Chrome and return here.';
+				'A managed browser window opened. Sign in to Google and confirm you can access GA4, then close it and return here.';
 		} catch (error) {
-			pageError = error instanceof Error ? error.message : 'Could not open Chrome sign-in.';
+			pageError = error instanceof Error ? error.message : 'Could not open browser sign-in.';
 		} finally {
 			openingSignIn = false;
 		}
@@ -165,9 +170,12 @@
 									Store the Gemini API key used by the local backend.
 								</CardDescription>
 							</div>
-							<Badge variant={settings.gemini_api_key_set ? 'default' : 'secondary'}>
-								{settings.gemini_api_key_set ? 'Configured' : 'Missing'}
-							</Badge>
+							<div class="flex flex-col items-end gap-2">
+								<Badge variant={settings.gemini_api_key_set ? 'default' : 'secondary'}>
+									{settings.gemini_api_key_set ? 'Configured' : 'Missing'}
+								</Badge>
+								<Auth class="h-14 w-14 text-muted-foreground/25 shrink-0" />
+							</div>
 						</div>
 					</CardHeader>
 					<CardContent class="space-y-4 pt-6">
@@ -187,12 +195,26 @@
 
 				<Card>
 					<CardHeader class="border-b border-border">
-						<CardTitle>Local Storage</CardTitle>
+						<CardTitle>Local Runtime</CardTitle>
 						<CardDescription>
 							App data and the managed browser session are stored on this machine.
 						</CardDescription>
 					</CardHeader>
 					<CardContent class="space-y-4 pt-6">
+						<div class="rounded-xl border border-border bg-muted/50 p-4">
+							<div class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Compatible Browser</div>
+							<div class="mt-2 text-sm text-foreground">
+								{settings.browser_available ? 'Detected' : 'Not found'}
+							</div>
+							<div class="mt-2 break-all font-mono text-xs text-muted-foreground">
+								{settings.browser_path || 'Install Google Chrome, Microsoft Edge, or Chromium'}
+							</div>
+							{#if !settings.browser_available}
+								<div class="mt-4">
+									<BrowserInstallHelp />
+								</div>
+							{/if}
+						</div>
 						<div class="rounded-xl border border-border bg-muted/50 p-4">
 							<div class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Application Data</div>
 							<div class="mt-2 break-all font-mono text-xs text-foreground">
@@ -222,32 +244,35 @@
 						<div>
 							<CardTitle>Google Session</CardTitle>
 							<CardDescription>
-								Sign in once with the app-managed Chrome profile, then reuse that session for future reports.
+								Sign in once with the app-managed browser profile, then reuse that session for future reports.
 							</CardDescription>
 						</div>
 						<ShieldCheck class="h-5 w-5 text-muted-foreground" />
 					</div>
 				</CardHeader>
-				<CardContent class="space-y-4 pt-6">
-					<div class="rounded-xl border border-border bg-muted/50 p-4 text-sm text-foreground">
-						The sign-in window should stay open until you close it. Once you confirm GA4 access there, later reports reuse the same saved session.
+				<CardContent class="flex items-start gap-6 pt-6">
+					<div class="flex-1 space-y-4">
+						<div class="rounded-xl border border-border bg-muted/50 p-4 text-sm text-foreground">
+							The sign-in window should stay open until you close it. Once you confirm GA4 access there, later reports reuse the same saved session in the app-managed profile directory.
+						</div>
+						<div class="flex items-center gap-3">
+							<Button
+								type="button"
+								variant="outline"
+								onclick={() => void openGoogleSignIn()}
+								disabled={openingSignIn || !settings.browser_available}
+							>
+								{#if openingSignIn}
+									<Loader2 class="mr-2 h-4 w-4 animate-spin" />
+									Opening browser...
+								{:else}
+									<KeyRound class="mr-2 h-4 w-4" />
+									Open Browser Sign-In
+								{/if}
+							</Button>
+						</div>
 					</div>
-					<div class="flex items-center gap-3">
-						<Button
-							type="button"
-							variant="outline"
-							onclick={() => void openGoogleSignIn()}
-							disabled={openingSignIn}
-						>
-							{#if openingSignIn}
-								<Loader2 class="mr-2 h-4 w-4 animate-spin" />
-								Opening Chrome...
-							{:else}
-								<KeyRound class="mr-2 h-4 w-4" />
-								Open Chrome Sign-In
-							{/if}
-						</Button>
-					</div>
+					<Session class="hidden xl:block shrink-0 h-28 w-28 text-muted-foreground/25" />
 				</CardContent>
 			</Card>
 		{/if}

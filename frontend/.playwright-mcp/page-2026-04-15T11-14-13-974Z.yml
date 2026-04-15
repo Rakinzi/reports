@@ -1,0 +1,192 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - link "unDraw" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e7]
+          - text: unDraw
+        - navigation "Main" [ref=e14]:
+          - list [ref=e16]:
+            - listitem [ref=e17]:
+              - link "❤️ Supporters" [ref=e18] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+            - listitem [ref=e19]:
+              - button "More" [ref=e20] [cursor=pointer]:
+                - text: More
+                - img [ref=e21]
+        - generic [ref=e24]:
+          - link "Search" [ref=e25] [cursor=pointer]:
+            - /url: /search
+          - button "Current color preview - Click to open color picker" [ref=e26] [cursor=pointer]
+          - button [ref=e28] [cursor=pointer]:
+            - img [ref=e29]
+    - banner [ref=e31]:
+      - generic [ref=e32]:
+        - heading "Illustrations" [level=1] [ref=e33]
+        - paragraph [ref=e34]: Browse to find the images that fit your needs and click to download. Use the on-the-fly color image generation to match your brand identity.
+      - 'link "🕹️ Supporters Update: The new Video Creator is live on unDraw+!" [ref=e35] [cursor=pointer]':
+        - /url: https://plus.undraw.co
+        - generic [ref=e36]: "🕹️ Supporters Update: The new Video Creator is live on unDraw+!"
+    - generic [ref=e37]:
+      - button "Contact Us" [ref=e38] [cursor=pointer]:
+        - img [ref=e42]
+        - generic [ref=e87]: Contact Us
+      - button "Level Up" [ref=e88] [cursor=pointer]:
+        - img [ref=e92]
+        - generic [ref=e114]: Level Up
+      - button "Performance Comparison" [ref=e115] [cursor=pointer]:
+        - img [ref=e119]
+        - generic [ref=e145]: Performance Comparison
+      - button "Sharing Ideas" [ref=e146] [cursor=pointer]:
+        - img [ref=e150]
+        - generic [ref=e226]: Sharing Ideas
+      - button "Studying Science" [ref=e227] [cursor=pointer]:
+        - img [ref=e231]
+        - generic [ref=e270]: Studying Science
+      - button "Local Server" [ref=e271] [cursor=pointer]:
+        - img [ref=e275]
+        - generic [ref=e313]: Local Server
+      - button "Trying on Clothes" [ref=e314] [cursor=pointer]:
+        - img [ref=e318]
+        - generic [ref=e350]: Trying on Clothes
+      - button "Morning Plans" [ref=e351] [cursor=pointer]:
+        - img [ref=e355]
+        - generic [ref=e382]: Morning Plans
+      - button "Meditation" [ref=e383] [cursor=pointer]:
+        - img [ref=e387]
+        - generic [ref=e412]: Meditation
+      - button "Empty Mailbox" [ref=e413] [cursor=pointer]:
+        - img [ref=e417]
+        - generic [ref=e430]: Empty Mailbox
+      - button "Question Answered" [ref=e431] [cursor=pointer]:
+        - img [ref=e435]
+        - generic [ref=e476]: Question Answered
+      - button "Voice Notes" [ref=e477] [cursor=pointer]:
+        - img [ref=e481]
+        - generic [ref=e608]: Voice Notes
+      - button "Artemis II" [ref=e609] [cursor=pointer]:
+        - img [ref=e613]
+        - generic [ref=e642]: Artemis II
+      - button "Heavy Lifting" [ref=e643] [cursor=pointer]:
+        - img [ref=e647]
+        - generic [ref=e675]: Heavy Lifting
+      - button "Social Media Interactions" [ref=e676] [cursor=pointer]:
+        - img [ref=e680]
+        - generic [ref=e715]: Social Media Interactions
+      - button "Upload Warning" [ref=e716] [cursor=pointer]:
+        - img [ref=e720]
+        - generic [ref=e743]: Upload Warning
+      - button "Puzzle Solved" [ref=e744] [cursor=pointer]:
+        - img [ref=e748]
+        - generic [ref=e767]: Puzzle Solved
+      - button "Empty Wallet" [ref=e768] [cursor=pointer]:
+        - img [ref=e772]
+        - generic [ref=e792]: Empty Wallet
+      - button "Work Chat" [ref=e793] [cursor=pointer]:
+        - img [ref=e797]
+        - generic [ref=e863]: Work Chat
+      - button "CLI Coding Agent" [ref=e864] [cursor=pointer]:
+        - img [ref=e868]
+        - generic [ref=e931]: CLI Coding Agent
+      - button "Doctor's Orders" [ref=e932] [cursor=pointer]:
+        - img [ref=e936]
+        - generic [ref=e970]: Doctor's Orders
+      - button "Thinking Mode" [ref=e971] [cursor=pointer]:
+        - img [ref=e975]
+        - generic [ref=e1013]: Thinking Mode
+      - button "Route Planning" [ref=e1014] [cursor=pointer]:
+        - img [ref=e1018]
+        - generic [ref=e1099]: Route Planning
+      - button "Server Failure" [ref=e1100] [cursor=pointer]:
+        - img [ref=e1104]
+        - generic [ref=e1147]: Server Failure
+      - button "Social Media Post" [ref=e1148] [cursor=pointer]:
+        - img [ref=e1152]
+        - generic [ref=e1178]: Social Media Post
+      - button "Astronomy" [ref=e1179] [cursor=pointer]:
+        - img [ref=e1183]
+        - generic [ref=e1223]: Astronomy
+      - button "Anonymous Feedback" [ref=e1224] [cursor=pointer]:
+        - img [ref=e1228]
+        - generic [ref=e1283]: Anonymous Feedback
+      - button "File Analysis" [ref=e1284] [cursor=pointer]:
+        - img [ref=e1288]
+        - generic [ref=e1414]: File Analysis
+      - button "AI Slop" [ref=e1415] [cursor=pointer]:
+        - img [ref=e1419]
+        - generic [ref=e1503]: AI Slop
+      - button "Notify" [ref=e1504] [cursor=pointer]:
+        - img [ref=e1508]
+        - generic [ref=e1531]: Notify
+      - button "System Update" [ref=e1532] [cursor=pointer]:
+        - img [ref=e1536]
+        - generic [ref=e1549]: System Update
+      - button "Control Panel" [ref=e1550] [cursor=pointer]:
+        - img [ref=e1554]
+        - generic [ref=e1611]: Control Panel
+      - button "Work Time" [ref=e1612] [cursor=pointer]:
+        - img [ref=e1616]
+        - generic [ref=e1709]: Work Time
+      - button "Time Change" [ref=e1710] [cursor=pointer]:
+        - img [ref=e1714]
+        - generic [ref=e1763]: Time Change
+      - button "Peekaboo" [ref=e1764] [cursor=pointer]:
+        - img [ref=e1768]
+        - generic [ref=e1827]: Peekaboo
+      - button "NFC Sharing" [ref=e1828] [cursor=pointer]:
+        - img [ref=e1832]
+        - generic [ref=e1865]: NFC Sharing
+      - button "Reading Notes" [ref=e1866] [cursor=pointer]:
+        - img [ref=e1870]
+        - generic [ref=e1883]: Reading Notes
+      - button "User Feedback" [ref=e1884] [cursor=pointer]:
+        - img [ref=e1888]
+        - generic [ref=e1928]: User Feedback
+      - button "Schedule Cleanup" [ref=e1929] [cursor=pointer]:
+        - img [ref=e1933]
+        - generic [ref=e1977]: Schedule Cleanup
+      - button "Open Source Code" [ref=e1978] [cursor=pointer]:
+        - img [ref=e1982]
+        - generic [ref=e2040]: Open Source Code
+    - generic [ref=e2041]:
+      - generic [ref=e2042]: Page 1 of 42
+      - link "Next" [ref=e2044] [cursor=pointer]:
+        - /url: /illustrations/2
+        - text: Next
+        - img
+    - contentinfo [ref=e2045]:
+      - generic [ref=e2046]:
+        - generic [ref=e2047]:
+          - list [ref=e2049]:
+            - listitem [ref=e2050]:
+              - link "Supporters" [ref=e2051] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+              - text: ·
+            - listitem [ref=e2052]:
+              - link "Thankful" [ref=e2053] [cursor=pointer]:
+                - /url: /thankful
+              - text: ·
+            - listitem [ref=e2054]:
+              - link "Twitter" [ref=e2055] [cursor=pointer]:
+                - /url: https://twitter.com/unDraw_co
+              - text: ·
+            - listitem [ref=e2056]:
+              - link "Blog" [ref=e2057] [cursor=pointer]:
+                - /url: /blog
+              - text: ·
+            - listitem [ref=e2058]:
+              - link "License" [ref=e2059] [cursor=pointer]:
+                - /url: /license
+          - paragraph [ref=e2060]: © 2026 · Katerina Limpitsouni · All rights reserved
+        - generic [ref=e2061]:
+          - paragraph [ref=e2062]:
+            - text: Created by
+            - link "Katerina Limpitsouni" [ref=e2063] [cursor=pointer]:
+              - /url: https://twitter.com/ninalimpi
+          - paragraph [ref=e2064]:
+            - text: Code / Design by
+            - link "Aggelos Gesoulis" [ref=e2065] [cursor=pointer]:
+              - /url: https://twitter.com/anges244
+    - region "Notifications alt+T"
+  - alert [ref=e2066]

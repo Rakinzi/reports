@@ -18,6 +18,9 @@
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import BootScreen from '$lib/components/BootScreen.svelte';
+	import NoData from '$lib/illustrations/NoData.svelte';
+	import Setup from '$lib/illustrations/Setup.svelte';
+	import BrowserInstallHelp from '$lib/components/BrowserInstallHelp.svelte';
 	import StatusOrb from '$lib/components/StatusOrb.svelte';
 	import GeneratingPulse from '$lib/components/GeneratingPulse.svelte';
 	import SpinnerArc from '$lib/components/SpinnerArc.svelte';
@@ -67,6 +70,8 @@
 	let settings = $state<SettingsState>({
 		configured: false,
 		gemini_api_key_set: false,
+		browser_available: false,
+		browser_path: '',
 		chrome_user_data_dir: '',
 		chrome_profile_directory: 'Default',
 		app_data_dir: ''
@@ -321,15 +326,22 @@
 					<CardHeader>
 						<CardTitle class="text-amber-700 dark:text-amber-200">Finish setup before generating reports</CardTitle>
 					</CardHeader>
-					<CardContent class="space-y-3 text-sm text-amber-800/80 dark:text-amber-100/80">
-						<p>Add a Gemini API key and point the app at a Chrome profile already signed into GA4.</p>
-						<Button size="sm" class="bg-amber-200 text-zinc-900 hover:bg-amber-100" onclick={() => goto('/settings')}>
-							Open Settings
-						</Button>
-						<p>Application data folder: <span class="font-mono text-xs">{settings.app_data_dir}</span></p>
-					</CardContent>
-				</Card>
-			{/if}
+						<CardContent class="flex items-start gap-6 text-sm text-amber-800/80 dark:text-amber-100/80">
+							<div class="flex-1 space-y-3">
+								<p>Add a Gemini API key and make sure Google Chrome, Microsoft Edge, or Chromium is installed for the app-managed session.</p>
+								<Button size="sm" class="bg-amber-200 text-zinc-900 hover:bg-amber-100" onclick={() => goto('/settings')}>
+									Open Settings
+								</Button>
+								{#if !settings.browser_available}
+									<p>No compatible Chromium browser detected on this machine yet.</p>
+									<BrowserInstallHelp />
+								{/if}
+								<p>Application data folder: <span class="font-mono text-xs">{settings.app_data_dir}</span></p>
+							</div>
+							<Setup class="hidden shrink-0 xl:block h-24 w-24 text-amber-600/50 dark:text-amber-300/40" />
+						</CardContent>
+					</Card>
+				{/if}
 
 			{#if refreshError}
 				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">
@@ -358,7 +370,7 @@
 				<CardContent class="p-0">
 					{#if reports.length === 0}
 						<div class="flex flex-col items-center justify-center py-16 text-center">
-							<FileText class="mb-3 h-10 w-10 text-muted-foreground/40" />
+							<NoData class="mb-6 h-40 w-40 text-muted-foreground/30" />
 							<p class="text-sm font-medium text-muted-foreground">No reports yet</p>
 							<p class="mt-1 text-xs text-muted-foreground/60">Generate your first report to get started</p>
 						</div>

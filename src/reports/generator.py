@@ -36,6 +36,7 @@ from .runtime import (
     get_templates_dir,
     load_runtime_environment,
 )
+from .browser_support import build_launch_prefs
 
 TEMPLATES_DIR = get_templates_dir()
 OUTPUT_DIR = get_output_dir()
@@ -265,6 +266,18 @@ def _switch_ga4_property_via_search(page, property_key: str):
     return page
 
 
+def _switch_ga4_property_by_id(page, property_id: str):
+    """Switch to a GA4 property using a raw numeric property ID (user-template path).
+    Injects the id temporarily into GA4_PROPERTIES under a sentinel key."""
+    _SENTINEL = "__user_template__"
+    GA4_PROPERTIES[_SENTINEL] = property_id
+    try:
+        page = _switch_ga4_property_via_search(page, _SENTINEL)
+    finally:
+        GA4_PROPERTIES.pop(_SENTINEL, None)
+    return page
+
+
 def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: int = 45000):
     expected_token = _ga4_property_token(property_key)
     expected_sections = _ga4_section_aliases(section_fragment)
@@ -336,23 +349,22 @@ def _launch_persistent_context(playwright, headless: bool = False):
         f"--profile-directory={chrome_profile_directory}",
         "--disable-blink-features=AutomationControlled",
     ]
-    try:
-        return playwright.chromium.launch_persistent_context(
-            user_data_dir=chrome_user_data_dir,
-            channel="chrome",
-            headless=headless,
-            args=stealth_args,
-            ignore_default_args=["--enable-automation"],
-            viewport={"width": 1920, "height": 1080},
-        )
-    except Exception:
-        return playwright.chromium.launch_persistent_context(
-            user_data_dir=chrome_user_data_dir,
-            headless=headless,
-            args=stealth_args,
-            ignore_default_args=["--enable-automation"],
-            viewport={"width": 1920, "height": 1080},
-        )
+    last_error: Exception | None = None
+    for launch_pref in build_launch_prefs():
+        try:
+            return playwright.chromium.launch_persistent_context(
+                user_data_dir=chrome_user_data_dir,
+                headless=headless,
+                args=stealth_args,
+                ignore_default_args=["--enable-automation"],
+                viewport={"width": 1920, "height": 1080},
+                **launch_pref,
+            )
+        except Exception as exc:
+            last_error = exc
+    raise RuntimeError(
+        "Could not launch a compatible Chromium browser. Install Google Chrome, Microsoft Edge, or Chromium."
+    ) from last_error
 
 
 def _set_date_range(page, start: str, end: str) -> None:
@@ -1154,6 +1166,7 @@ def generate_report(
     # Step 7: Replace screenshots
     # Format: slide_idx (0-based) -> (screenshot_label, picture_index_on_slide)
     screenshot_slide_map = {
+        0: ("home_chart",      "Picture 14"),  # Slide 1 - cover GA4 line chart
         3: ("home_chart",      "Picture 10"),  # Slide 4 - line chart
         4: ("country_chart",   "Picture 8"),   # Slide 5 - country bar chart
         5: ("countries_table", "Picture 6"),   # Slide 6 - countries table

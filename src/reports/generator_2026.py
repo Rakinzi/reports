@@ -1407,15 +1407,15 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.wait_for_timeout(1000)
     start_input = page.get_by_label("Start date")
     start_input.wait_for(state="visible", timeout=10000)
-    start_input.triple_click()
-    page.keyboard.press("Control+a")
+    start_input.click(click_count=3)
+    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
     page.wait_for_timeout(200)
     start_input.fill(start_date)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
     end_input = page.get_by_label("End date")
-    end_input.triple_click()
-    page.keyboard.press("Control+a")
+    end_input.click(click_count=3)
+    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
     page.wait_for_timeout(200)
     end_input.fill(end_date)
     page.keyboard.press("Tab")
@@ -1806,20 +1806,6 @@ def _scrape_website_pages(
         context = _launch_persistent_context(p, headless=False)
         ga4_page = None
         try:
-            # Keep previous-month metrics and top-pages scraping in the same GA4 session.
-            # This avoids auth/state drift between two separate persistent contexts.
-            _stage("Scraping previous month metrics...")
-            try:
-                prev_ga4_metrics, ga4_page = _scrape_prev_metrics_with_context(context, report_name, start_date)
-                if not prev_ga4_metrics.get("home_metrics"):
-                    logger.warning(
-                        "[2026] Previous month metrics returned no data. report_name=%s start_date=%s",
-                        report_name,
-                        start_date,
-                    )
-            except Exception as e:
-                logger.warning("[2026] Previous month metrics scrape failed in shared session: %s", e)
-
             _stage("Scraping top pages from GA4...")
             top5 = _scrape_ga4_page_paths(
                 context,
@@ -2290,7 +2276,7 @@ def generate_report_2026(
     )
 
     # Step 1b: Scrape previous month metrics + visit client website pages in one browser session
-    _stage("Scraping previous month metrics + client website pages...")
+    _stage("Scraping client website pages...")
     website_pages, prev_ga4_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
 
     # Step 2: Load template

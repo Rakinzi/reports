@@ -1,0 +1,195 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - link "unDraw" [ref=e6] [cursor=pointer]:
+          - /url: /illustrations
+          - img [ref=e7]
+          - text: unDraw
+        - navigation "Main" [ref=e14]:
+          - list [ref=e16]:
+            - listitem [ref=e17]:
+              - link "❤️ Supporters" [ref=e18] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+            - listitem [ref=e19]:
+              - button "More" [ref=e20] [cursor=pointer]:
+                - text: More
+                - img [ref=e21]
+        - generic [ref=e24]:
+          - link "Search" [ref=e25] [cursor=pointer]:
+            - /url: /search
+          - button "Current color preview - Click to open color picker" [ref=e26] [cursor=pointer]
+          - button [ref=e28] [cursor=pointer]:
+            - img [ref=e29]
+    - banner [ref=e31]:
+      - generic [ref=e32]:
+        - heading "Illustrations page 3" [level=1] [ref=e33]:
+          - text: Illustrations
+          - generic [ref=e34]: page 3
+        - paragraph [ref=e35]: Continue browsing to find artwork you like, with the color you prefer and click to download.
+    - generic [ref=e36]:
+      - button "Add Files" [ref=e37] [cursor=pointer]:
+        - img [ref=e41]
+        - generic [ref=e67]: Add Files
+      - button "Knocking on the Door" [ref=e68] [cursor=pointer]:
+        - img [ref=e72]
+        - generic [ref=e102]: Knocking on the Door
+      - button "Marketing Analysis" [ref=e103] [cursor=pointer]:
+        - img [ref=e107]
+        - generic [ref=e135]: Marketing Analysis
+      - button "Fixing Bugs" [ref=e136] [cursor=pointer]:
+        - img [ref=e140]
+        - generic [ref=e171]: Fixing Bugs
+      - button "Questions" [ref=e172] [cursor=pointer]:
+        - img [ref=e176]
+        - generic [ref=e224]: Questions
+      - button "Secure USB Drive" [ref=e225] [cursor=pointer]:
+        - img [ref=e229]
+        - generic [ref=e261]: Secure USB Drive
+      - button "Multitasking" [ref=e262] [cursor=pointer]:
+        - img [ref=e266]
+        - generic [ref=e301]: Multitasking
+      - button "Vacation Selfie" [ref=e302] [cursor=pointer]:
+        - img [ref=e306]
+        - generic [ref=e328]: Vacation Selfie
+      - button "Dancing" [ref=e329] [cursor=pointer]:
+        - img [ref=e333]
+        - generic [ref=e356]: Dancing
+      - button "Plan Mode" [ref=e357] [cursor=pointer]:
+        - img [ref=e361]
+        - generic [ref=e400]: Plan Mode
+      - button "Fitness Stats" [ref=e401] [cursor=pointer]:
+        - img [ref=e405]
+        - generic [ref=e434]: Fitness Stats
+      - button "AI Code Assistant" [ref=e435] [cursor=pointer]:
+        - img [ref=e439]
+        - generic [ref=e462]: AI Code Assistant
+      - button "Successful" [ref=e463] [cursor=pointer]:
+        - img [ref=e467]
+        - generic [ref=e500]: Successful
+      - button "Personal Training" [ref=e501] [cursor=pointer]:
+        - img [ref=e505]
+        - generic [ref=e532]: Personal Training
+      - button "Online Shopping" [ref=e533] [cursor=pointer]:
+        - img [ref=e537]
+        - generic [ref=e666]: Online Shopping
+      - button "Painting the Room" [ref=e667] [cursor=pointer]:
+        - img [ref=e671]
+        - generic [ref=e720]: Painting the Room
+      - button "Out of Office" [ref=e721] [cursor=pointer]:
+        - img [ref=e725]
+        - generic [ref=e755]: Out of Office
+      - button "Decide" [ref=e756] [cursor=pointer]:
+        - img [ref=e760]
+        - generic [ref=e819]: Decide
+      - button "Newsletter Subscriber" [ref=e820] [cursor=pointer]:
+        - img [ref=e824]
+        - generic [ref=e842]: Newsletter Subscriber
+      - button "Daydreaming" [ref=e843] [cursor=pointer]:
+        - img [ref=e847]
+        - generic [ref=e866]: Daydreaming
+      - button "Order Food" [ref=e867] [cursor=pointer]:
+        - img [ref=e871]
+        - generic [ref=e952]: Order Food
+      - button "Mathematics" [ref=e953] [cursor=pointer]:
+        - img [ref=e957]
+        - generic [ref=e980]: Mathematics
+      - button "Around the World" [ref=e981] [cursor=pointer]:
+        - img [ref=e985]
+        - generic [ref=e1046]: Around the World
+      - button "Revenue Analysis" [ref=e1047] [cursor=pointer]:
+        - img [ref=e1051]
+        - generic [ref=e1100]: Revenue Analysis
+      - button "Love Note" [ref=e1101] [cursor=pointer]:
+        - img [ref=e1105]
+        - generic [ref=e1113]: Love Note
+      - button "Mobile Coding" [ref=e1114] [cursor=pointer]:
+        - img [ref=e1118]
+        - generic [ref=e1187]: Mobile Coding
+      - button "Radio Options" [ref=e1188] [cursor=pointer]:
+        - img [ref=e1192]
+        - generic [ref=e1205]: Radio Options
+      - button "Choose Color" [ref=e1206] [cursor=pointer]:
+        - img [ref=e1210]
+        - generic [ref=e1234]: Choose Color
+      - button "Shopping Favorites" [ref=e1235] [cursor=pointer]:
+        - img [ref=e1239]
+        - generic [ref=e1256]: Shopping Favorites
+      - button "Data Table" [ref=e1257] [cursor=pointer]:
+        - img [ref=e1261]
+        - generic [ref=e1313]: Data Table
+      - button "Social Post" [ref=e1314] [cursor=pointer]:
+        - img [ref=e1318]
+        - generic [ref=e1337]: Social Post
+      - button "Fast-Changing World" [ref=e1338] [cursor=pointer]:
+        - img [ref=e1342]
+        - generic [ref=e1440]: Fast-Changing World
+      - button "Device Sync" [ref=e1441] [cursor=pointer]:
+        - img [ref=e1445]
+        - generic [ref=e1490]: Device Sync
+      - button "Process" [ref=e1491] [cursor=pointer]:
+        - img [ref=e1495]
+        - generic [ref=e1544]: Process
+      - button "Focused Dev" [ref=e1545] [cursor=pointer]:
+        - img [ref=e1549]
+        - generic [ref=e1581]: Focused Dev
+      - button "Starry Window" [ref=e1582] [cursor=pointer]:
+        - img [ref=e1586]
+        - generic [ref=e1632]: Starry Window
+      - button "QR Code Scan" [ref=e1633] [cursor=pointer]:
+        - img [ref=e1637]
+        - generic [ref=e1665]: QR Code Scan
+      - button "Treasure" [ref=e1666] [cursor=pointer]:
+        - img [ref=e1670]
+        - generic [ref=e1701]: Treasure
+      - button "Completed" [ref=e1702] [cursor=pointer]:
+        - img [ref=e1706]
+        - generic [ref=e1719]: Completed
+      - button "Searching Everywhere" [ref=e1720] [cursor=pointer]:
+        - img [ref=e1724]
+        - generic [ref=e1758]: Searching Everywhere
+    - generic [ref=e1759]:
+      - link "Previous" [ref=e1761] [cursor=pointer]:
+        - /url: /illustrations/2
+        - img
+        - text: Previous
+      - generic [ref=e1762]: Page 3 of 42
+      - link "Next" [ref=e1764] [cursor=pointer]:
+        - /url: /illustrations/4
+        - text: Next
+        - img
+    - contentinfo [ref=e1765]:
+      - generic [ref=e1766]:
+        - generic [ref=e1767]:
+          - list [ref=e1769]:
+            - listitem [ref=e1770]:
+              - link "Supporters" [ref=e1771] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+              - text: ·
+            - listitem [ref=e1772]:
+              - link "Thankful" [ref=e1773] [cursor=pointer]:
+                - /url: /thankful
+              - text: ·
+            - listitem [ref=e1774]:
+              - link "Twitter" [ref=e1775] [cursor=pointer]:
+                - /url: https://twitter.com/unDraw_co
+              - text: ·
+            - listitem [ref=e1776]:
+              - link "Blog" [ref=e1777] [cursor=pointer]:
+                - /url: /blog
+              - text: ·
+            - listitem [ref=e1778]:
+              - link "License" [ref=e1779] [cursor=pointer]:
+                - /url: /license
+          - paragraph [ref=e1780]: © 2026 · Katerina Limpitsouni · All rights reserved
+        - generic [ref=e1781]:
+          - paragraph [ref=e1782]:
+            - text: Created by
+            - link "Katerina Limpitsouni" [ref=e1783] [cursor=pointer]:
+              - /url: https://twitter.com/ninalimpi
+          - paragraph [ref=e1784]:
+            - text: Code / Design by
+            - link "Aggelos Gesoulis" [ref=e1785] [cursor=pointer]:
+              - /url: https://twitter.com/anges244
+    - region "Notifications alt+T"
+  - alert [ref=e1786]

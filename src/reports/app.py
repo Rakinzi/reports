@@ -1,8 +1,11 @@
+import json
+import re
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 
@@ -13,10 +16,13 @@ from .db import (
     update_report_completed, update_report_failed,
     update_report_slides_dir, update_report_edits, update_report_stage,
     delete_report,
+    create_template, get_template, get_template_by_slug, list_templates,
+    update_template_config, update_template_preview_dir, delete_template,
+    upsert_template_shapes, list_template_shapes,
 )
 from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
-from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings
-from .schemas import AppSettingsUpdate, GenerateReportRequest
+from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings, get_user_templates_dir
+from .schemas import AppSettingsUpdate, GenerateReportRequest, HARDCODED_REPORT_NAMES
 
 _executor = ThreadPoolExecutor(max_workers=1)
 logger = configure_logging()
@@ -39,6 +45,9 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
 
         if report_name in TEMPLATES_2026:
             generate_fn = generate_report_2026
+        elif get_template_by_slug(report_name) is not None:
+            from .template_runner import generate_user_template
+            generate_fn = generate_user_template
         else:
             generate_fn = generate_report
 
@@ -125,6 +134,12 @@ def get_google_sign_in_status():
 
 @app.post("/settings/google-sign-in")
 def post_google_sign_in():
+    status = get_runtime_status()
+    if not status["browser_available"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No compatible browser installation was found. Install Google Chrome, Microsoft Edge, or Chromium.",
+        )
     return JSONResponse(open_google_sign_in())
 
 
@@ -149,8 +164,13 @@ def get_logs_stream():
 @app.post("/reports/generate", status_code=202)
 def post_generate_report(body: GenerateReportRequest):
     status = get_runtime_status()
-    if not status["configured"]:
+    if not status["gemini_api_key_set"]:
         raise HTTPException(status_code=400, detail="Gemini API key is not configured")
+    if not status["browser_available"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No compatible browser installation was found. Install Google Chrome, Microsoft Edge, or Chromium.",
+        )
 
     report_id = create_report(body.report_name, body.date_range, body.report_date)
     _cancel_flags[report_id] = threading.Event()
@@ -378,6 +398,205 @@ def apply_report_edits(report_id: int, body: dict):
         "output_path": str(edited_path),
         "download_url": f"/reports/{report_id}/download",
     })
+
+
+_SLUG_RE = re.compile(r'^[a-z0-9_]+$')
+_MAX_PPTX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+def _render_template_previews_bg(template_id: int, pptx_path: Path, preview_dir: Path) -> None:
+    """Background task: render slide PNGs then update preview_dir in DB."""
+    try:
+        from .slides import render_slides_to_dir
+        render_slides_to_dir(pptx_path, preview_dir)
+        update_template_preview_dir(template_id, str(preview_dir))
+        logger.info("Template preview rendered for template_id=%s at %s", template_id, preview_dir)
+    except Exception as exc:
+        logger.warning("Template preview render failed for template_id=%s: %s", template_id, exc)
+
+
+@app.post("/templates/upload", status_code=201)
+async def upload_template(
+    file: UploadFile = File(...),
+    label: str = Form(...),
+    slug: str = Form(...),
+):
+    # --- Validate inputs ---
+    if not file.filename or not file.filename.lower().endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="Only .pptx files are supported")
+    if not _SLUG_RE.match(slug):
+        raise HTTPException(status_code=400, detail="slug must match [a-z0-9_]+")
+    if slug in HARDCODED_REPORT_NAMES:
+        raise HTTPException(status_code=400, detail=f"slug '{slug}' conflicts with a built-in report name")
+    if get_template_by_slug(slug) is not None:
+        raise HTTPException(status_code=409, detail=f"A template with slug '{slug}' already exists")
+
+    content = await file.read()
+    if len(content) > _MAX_PPTX_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds the 50 MB limit")
+
+    # --- Save the PPTX ---
+    templates_dir = get_user_templates_dir()
+    pptx_path = templates_dir / f"{slug}.pptx"
+    pptx_path.write_bytes(content)
+
+    # --- Extract shapes and slide count ---
+    try:
+        from pptx import Presentation
+        from .slides import extract_all_shapes
+        prs = Presentation(str(pptx_path))
+        slide_count = len(prs.slides)
+        shapes = extract_all_shapes(pptx_path)
+    except Exception as exc:
+        pptx_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=f"Could not parse PPTX: {exc}") from exc
+
+    # --- Persist to DB ---
+    template_id = create_template(label, slug, str(pptx_path), slide_count)
+    upsert_template_shapes(template_id, shapes)
+
+    # --- Render previews in background ---
+    preview_dir = templates_dir / f"{slug}-previews"
+    _executor.submit(_render_template_previews_bg, template_id, pptx_path, preview_dir)
+
+    return JSONResponse({"id": template_id, "slug": slug, "slide_count": slide_count}, status_code=201)
+
+
+@app.get("/templates")
+def get_templates():
+    return JSONResponse(list_templates())
+
+
+@app.get("/templates/report-options")
+def get_report_options():
+    """Return merged built-in + user template list for the report generation dropdown."""
+    options = [
+        {"value": name, "label": name.replace("_", " ").title(), "source": "builtin"}
+        for name in sorted(HARDCODED_REPORT_NAMES)
+    ]
+    for t in list_templates():
+        options.append({"value": t["slug"], "label": t["label"], "source": "user"})
+    return JSONResponse(options)
+
+
+@app.get("/templates/{template_id}")
+def get_template_by_id(template_id: int):
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    try:
+        field_map = json.loads(template["field_map"])
+    except Exception:
+        field_map = []
+    return JSONResponse({**template, "field_map": field_map, "has_field_map": bool(field_map)})
+
+
+@app.get("/templates/{template_id}/shapes")
+def get_template_shapes(template_id: int):
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    shapes = list_template_shapes(template_id)
+    preview_dir = template.get("preview_dir")
+
+    # Group shapes by slide
+    slides: dict[int, dict] = {}
+    for shape in shapes:
+        idx = shape["slide_index"]
+        if idx not in slides:
+            has_image = bool(preview_dir and (Path(preview_dir) / f"slide_{idx}.png").exists())
+            slides[idx] = {
+                "slide_index": idx,
+                "image_url": f"/templates/{template_id}/slides/{idx}/image" if has_image else None,
+                "shapes": [],
+            }
+        slides[idx]["shapes"].append(shape)
+
+    return JSONResponse(list(slides.values()))
+
+
+@app.get("/templates/{template_id}/slides/{slide_index}/image")
+def get_template_slide_image(template_id: int, slide_index: int):
+    template = get_template(template_id)
+    if not template or not template.get("preview_dir"):
+        raise HTTPException(status_code=404, detail="Slide images not available yet")
+    image_path = Path(template["preview_dir"]) / f"slide_{slide_index}.png"
+    if not image_path.exists():
+        raise HTTPException(status_code=404, detail=f"Slide {slide_index} image not found")
+    return FileResponse(str(image_path), media_type="image/png")
+
+
+@app.put("/templates/{template_id}/config")
+def put_template_config(template_id: int, body: dict):
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    ga4_property_id = str(body.get("ga4_property_id", "")).strip()
+    gsc_url = str(body.get("gsc_url", "")).strip()
+    is_seven_slide = bool(body.get("is_seven_slide", False))
+    field_map = body.get("field_map", [])
+    update_template_config(template_id, ga4_property_id, gsc_url, is_seven_slide, json.dumps(field_map))
+    return JSONResponse(get_template(template_id))
+
+
+@app.delete("/templates/{template_id}")
+def delete_template_by_id(template_id: int):
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    # Clean up files
+    try:
+        Path(template["pptx_path"]).unlink(missing_ok=True)
+    except Exception:
+        pass
+    if template.get("preview_dir"):
+        try:
+            shutil.rmtree(template["preview_dir"], ignore_errors=True)
+        except Exception:
+            pass
+    deleted = delete_template(template_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return JSONResponse({"id": template_id, "deleted": True})
+
+
+@app.post("/templates/ga4-search")
+def search_ga4_properties(body: dict):
+    """Search GA4 properties via Playwright (runs in the shared executor with 20s timeout)."""
+    from concurrent.futures import TimeoutError as FutureTimeout
+    query = str(body.get("query", "")).strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    def _do_search():
+        from .generator import _launch_persistent_context, _open_analytics_root
+        import os
+        load_runtime_environment()
+        ctx = _launch_persistent_context()
+        try:
+            page = ctx.new_page()
+            _open_analytics_root(page)
+            # Try to find the search input and type the query
+            search_input = page.get_by_role("searchbox").first
+            search_input.wait_for(state="visible", timeout=8000)
+            search_input.click()
+            page.wait_for_timeout(300)
+            search_input.fill(query)
+            page.wait_for_timeout(2000)
+            # Collect visible option texts
+            results = page.locator('[role="option"], [role="listitem"]').all_text_contents()
+            return [r.strip() for r in results if r.strip()]
+        finally:
+            ctx.close()
+
+    future = _executor.submit(_do_search)
+    try:
+        results = future.result(timeout=25)
+        return JSONResponse({"results": results})
+    except FutureTimeout:
+        raise HTTPException(status_code=504, detail="GA4 search timed out")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"GA4 search failed: {exc}") from exc
 
 
 @app.get("/reports/econet")

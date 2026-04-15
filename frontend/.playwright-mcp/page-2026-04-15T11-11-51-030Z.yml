@@ -1,0 +1,345 @@
+- generic:
+  - generic:
+    - navigation:
+      - generic:
+        - generic:
+          - link:
+            - /url: /
+            - img
+            - text: unDraw
+        - generic:
+          - navigation:
+            - generic:
+              - list:
+                - listitem:
+                  - link:
+                    - /url: https://plus.undraw.co
+                    - text: ❤️ Supporters
+                - listitem:
+                  - button:
+                    - text: More
+                    - img
+        - generic:
+          - generic:
+            - link:
+              - /url: /search
+              - text: Search
+            - button
+            - generic:
+              - button:
+                - img
+    - banner:
+      - generic:
+        - heading [level=1]: Illustrations
+        - paragraph: Browse to find the images that fit your needs and click to download. Use the on-the-fly color image generation to match your brand identity.
+      - link:
+        - /url: https://plus.undraw.co
+        - generic: "🕹️ Supporters Update: The new Video Creator is live on unDraw+!"
+    - generic:
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Contact Us
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Level Up
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Performance Comparison
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Sharing Ideas
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Studying Science
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Local Server
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Trying on Clothes
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Morning Plans
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Meditation
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Empty Mailbox
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Question Answered
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Voice Notes
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Artemis II
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Heavy Lifting
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Social Media Interactions
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Upload Warning
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Puzzle Solved
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Empty Wallet
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Work Chat
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: CLI Coding Agent
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Doctor's Orders
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Thinking Mode
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Route Planning
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Server Failure
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Social Media Post
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Astronomy
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Anonymous Feedback
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: File Analysis
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: AI Slop
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Notify
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: System Update
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Control Panel
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Work Time
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Time Change
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Peekaboo
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: NFC Sharing
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Reading Notes
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: User Feedback
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Schedule Cleanup
+      - button:
+        - generic:
+          - generic:
+            - generic:
+              - img
+        - generic: Open Source Code
+    - generic:
+      - generic: Page 1 of 42
+      - generic:
+        - link:
+          - /url: /illustrations/2
+          - text: Next
+          - img
+    - contentinfo:
+      - generic:
+        - generic:
+          - generic:
+            - list:
+              - listitem:
+                - link:
+                  - /url: https://plus.undraw.co
+                  - text: Supporters
+                - text: ·
+              - listitem:
+                - link:
+                  - /url: /thankful
+                  - text: Thankful
+                - text: ·
+              - listitem:
+                - link:
+                  - /url: https://twitter.com/unDraw_co
+                  - text: Twitter
+                - text: ·
+              - listitem:
+                - link:
+                  - /url: /blog
+                  - text: Blog
+                - text: ·
+              - listitem:
+                - link:
+                  - /url: /license
+                  - text: License
+          - paragraph: © 2026 · Katerina Limpitsouni · All rights reserved
+        - generic:
+          - paragraph:
+            - text: Created by
+            - link:
+              - /url: https://twitter.com/ninalimpi
+              - text: Katerina Limpitsouni
+          - paragraph:
+            - text: Code / Design by
+            - link:
+              - /url: https://twitter.com/anges244
+              - text: Aggelos Gesoulis
+    - generic:
+      - generic:
+        - generic:
+          - img
+    - region "Notifications alt+T"
+  - generic:
+    - alert
+  - dialog "Download illustration dialog opened" [ref=e2243]:
+    - heading "Download illustration dialog opened" [level=2] [ref=e2244]
+    - paragraph [ref=e2245]: You can now download this illustration
+    - button [active] [ref=e2246] [cursor=pointer]:
+      - img [ref=e2247]
+    - generic [ref=e2250]:
+      - img [ref=e2254]
+      - generic [ref=e2311]:
+        - heading "Control Panel" [level=3] [ref=e2312]
+        - generic [ref=e2313]:
+          - button "Download SVG for your projects" [ref=e2314] [cursor=pointer]
+          - button "Download PNG for your blog / social" [ref=e2315] [cursor=pointer]
