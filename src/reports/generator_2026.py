@@ -427,6 +427,26 @@ def _classify_page(title: str) -> str:
     return "product"
 
 
+def _classify_page_from_row(row: dict) -> str:
+    """Classify using the GA4 path first, falling back to title text only when needed."""
+    path_value = str(row.get("path", "")).strip().lower()
+    title_value = str(row.get("title", "")).strip().lower()
+    combined = f"{path_value} {title_value}".strip()
+
+    if path_value in {"", "/"}:
+        return "home"
+    if any(kw in combined for kw in _PAGE_COMPLIANCE_KEYWORDS):
+        return "compliance"
+    if any(kw in combined for kw in _PAGE_SUPPORT_KEYWORDS):
+        return "support"
+
+    # If the path is a concrete content URL, treat it as a normal content/product page.
+    if path_value.startswith("/"):
+        return "product"
+
+    return _classify_page(title_value)
+
+
 def _short_title(title: str) -> str:
     """Return a clean short label: strip brand suffix from either side, normalise T&C variants."""
     _TC_VARIANTS = ("terms and conditions", "ts and cs", "terms & conditions", "terms of service")
@@ -564,12 +584,13 @@ def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple
         return ("", "", "", "")
 
     for p in pages_data:
-        p["_type"] = _classify_page(p["title"])
-        raw_label = _short_title(p["title"])
+        p["_type"] = _classify_page_from_row(p)
+        raw_label = _fallback_page_label(p.get("path", p["title"]))
         p["_label"] = "Homepage" if p["_type"] == "home" else raw_label
 
     top = pages_data[0]
-    second = pages_data[1] if len(pages_data) > 1 else None
+    secondary_pages = [p for p in pages_data[1:] if p.get("_label") != "Homepage"]
+    second = secondary_pages[0] if secondary_pages else (pages_data[1] if len(pages_data) > 1 else None)
     compliance_pages = [p for p in pages_data if p["_type"] == "compliance"]
     support_pages = [p for p in pages_data if p["_type"] == "support"]
 
@@ -595,8 +616,10 @@ def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple
             f"predominantly influenced by campaign landing directives over organic browsing."
         )
     else:
+        secondary_labels = [p["_label"] for p in secondary_pages[:2]]
+        secondary_phrase = " and ".join(secondary_labels) if secondary_labels else "other pages"
         raw_para2 = (
-            f"Secondary pages such as {second['_label'] if second else 'other pages'} contribute meaningful traffic, "
+            f"Secondary pages such as {secondary_phrase} contribute meaningful traffic, "
             f"but with more limited evidence of deep exploratory browsing."
         )
 
@@ -1502,43 +1525,104 @@ def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
     pages_data: list[dict] = []
     site_total_views = 0
 
-    body = page.locator("body").inner_text()
-    total_match = re.search(r"(?:^|\n)\s*Total\s*\n\s*([\d,]+)\s*\n\s*100% of total", body)
-    if total_match:
-        try:
-            site_total_views = int(total_match.group(1).replace(",", ""))
-        except ValueError:
-            site_total_views = 0
+    def _clean_cell(text: str) -> str:
+        return re.sub(r"\s+", " ", text).strip()
 
-    for line in body.splitlines():
-        cols = [col.strip() for col in line.split("\t") if col.strip()]
-        if not cols or len(cols) < 5 or not cols[0].isdigit() or len(pages_data) >= 10:
-            continue
+    def _extract_count_and_pct(text: str) -> tuple[int | None, str]:
+        normalized = _clean_cell(text)
+        count_match = re.match(r"^([\d,]+)", normalized)
+        pct_match = re.search(r"\(([^)]+%)\)", normalized)
+        count = None
+        if count_match:
+            try:
+                count = int(count_match.group(1).replace(",", ""))
+            except ValueError:
+                count = None
+        return count, (pct_match.group(1) if pct_match else "")
 
-        title = cols[1]
-        views_match = re.match(r"^([\d,]+)", cols[2])
-        active_users_match = re.match(r"^([\d,]+)", cols[3])
-        views_pct_match = re.search(r"\(([^)]+%)\)", cols[2])
-        active_users_pct_match = re.search(r"\(([^)]+%)\)", cols[3])
-        if not views_match or not active_users_match:
-            continue
+    try:
+        rows = page.locator("table.adv-table tbody tr")
+        row_count = rows.count()
+        for i in range(row_count):
+            row = rows.nth(i)
+            cols = [_clean_cell(text) for text in row.locator("td").all_inner_texts()]
+            cols = [col for col in cols if col]
+            if len(cols) < 6:
+                continue
 
-        try:
-            views = int(views_match.group(1).replace(",", ""))
-            pages_data.append({
-                "title": title,
-                "path": title,
+            first = cols[0].lower()
+            if first == "total":
+                total_views, _ = _extract_count_and_pct(cols[1])
+                if total_views is not None:
+                    site_total_views = total_views
+                continue
+
+            if not cols[0].isdigit() or len(pages_data) >= 10:
+                continue
+
+            path_value = cols[1]
+            views, views_pct = _extract_count_and_pct(cols[2])
+            active_users, active_users_pct = _extract_count_and_pct(cols[3])
+            if views is None or active_users is None:
+                continue
+
+            row_data = {
+                "title": path_value,
+                "path": path_value,
                 "views": views,
-                "views_pct": views_pct_match.group(1) if views_pct_match else "",
-                "active_users": int(active_users_match.group(1).replace(",", "")),
-                "active_users_pct": active_users_pct_match.group(1) if active_users_pct_match else "",
+                "views_pct": views_pct,
+                "active_users": active_users,
+                "active_users_pct": active_users_pct,
+                "views_per_user": cols[4],
+                "avg_engagement_time": cols[5],
+            }
+            pages_data.append(row_data)
+            if len(page_views) < 4:
+                page_views[path_value] = views
+
+        # GA4 sometimes renders the "Total" summary outside the normal tbody rows.
+        # Fall back to the full page text when the direct row scan didn't capture it.
+        if site_total_views == 0:
+            body = page.locator("body").inner_text()
+            total_match = re.search(r"(?:^|\n)\s*Total\s*\n\s*([\d,]+)\s*\n\s*100% of total", body)
+            if total_match:
+                try:
+                    site_total_views = int(total_match.group(1).replace(",", ""))
+                except ValueError:
+                    site_total_views = 0
+    except Exception:
+        # Fall back to the old body-text path if GA4 changes the row structure again.
+        body = page.locator("body").inner_text()
+        total_match = re.search(r"(?:^|\n)\s*Total\s*\n\s*([\d,]+)\s*\n\s*100% of total", body)
+        if total_match:
+            try:
+                site_total_views = int(total_match.group(1).replace(",", ""))
+            except ValueError:
+                site_total_views = 0
+
+        for line in body.splitlines():
+            cols = [col.strip() for col in line.split("\t") if col.strip()]
+            if not cols or len(cols) < 5 or not cols[0].isdigit() or len(pages_data) >= 10:
+                continue
+
+            path_value = cols[1]
+            views, views_pct = _extract_count_and_pct(cols[2])
+            active_users, active_users_pct = _extract_count_and_pct(cols[3])
+            if views is None or active_users is None:
+                continue
+
+            pages_data.append({
+                "title": path_value,
+                "path": path_value,
+                "views": views,
+                "views_pct": views_pct,
+                "active_users": active_users,
+                "active_users_pct": active_users_pct,
                 "views_per_user": cols[4],
                 "avg_engagement_time": cols[5] if len(cols) > 5 else "",
             })
             if len(page_views) < 4:
-                page_views[title] = views
-        except ValueError:
-            continue
+                page_views[path_value] = views
 
     return page_views, pages_data, site_total_views
 
