@@ -6,6 +6,7 @@ Called by app.py when the requested report name is in TEMPLATES_2026.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from copy import deepcopy
@@ -97,20 +98,56 @@ GSC_URLS: dict[str, str] = {
 
 def _gemini_para(raw: str) -> str:
     """Paraphrase raw text via Gemini, returning the same approximate length."""
+    return _gemini_paras_batch([raw])[0]
+
+
+def _gemini_paras_batch(raws: list[str]) -> list[str]:
+    """Paraphrase multiple texts in a single Gemini call. Returns results in the same order."""
     load_runtime_environment()
-    word_count = len(raw.split())
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=(
-            f"Paraphrase the following for a professional PowerPoint report. "
-            f"Keep all numbers, percentages, and proper nouns exactly as they are. "
-            f"Use clear, formal business English. No em dashes, bullets, or markdown. "
-            f"Output must be approximately {word_count} words — do not shorten or expand. "
-            f"Output one plain paragraph only.\n\n" + raw
-        ),
+    if not raws:
+        return []
+    if len(raws) == 1:
+        word_count = len(raws[0].split())
+        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        resp = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=(
+                f"Paraphrase the following for a professional PowerPoint report. "
+                f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+                f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+                f"Output must be approximately {word_count} words — do not shorten or expand. "
+                f"Output one plain paragraph only.\n\n" + raws[0]
+            ),
+        )
+        return [resp.text.strip()]
+
+    sections = "\n\n".join(
+        f"[{i + 1}] (~{len(r.split())} words)\n{r}" for i, r in enumerate(raws)
     )
-    return resp.text.strip()
+    prompt = (
+        f"Paraphrase each of the following {len(raws)} numbered texts for a professional PowerPoint report. "
+        f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+        f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+        f"Match each text's approximate word count. "
+        f"Output ONLY the paraphrased texts, each preceded by its number in the format [1], [2], etc. "
+        f"One plain paragraph per number. No other text.\n\n"
+        + sections
+    )
+    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+    raw_output = resp.text.strip()
+
+    # Parse [1] ... [2] ... sections from the response
+    import re as _re
+    parts = _re.split(r"\[(\d+)\]", raw_output)
+    result_map: dict[int, str] = {}
+    for idx in range(1, len(parts), 2):
+        num = int(parts[idx])
+        text = parts[idx + 1].strip() if idx + 1 < len(parts) else ""
+        result_map[num] = text
+
+    # Fall back to original if parsing fails for any entry
+    return [result_map.get(i + 1, raws[i]) for i in range(len(raws))]
 
 
 def _write_para_with_highlights(para, text: str, bold_words: set[str] | None = None) -> None:
@@ -187,7 +224,7 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
     try:
         nu = _parse_num(new_users)
         au = _parse_num(active_users)
-        new_pct = f"{round(nu / au * 100)}%" if au > 0 else "N/A"
+        new_pct = f"{round(nu / au * 100, 1)}%" if au > 0 else "N/A"
     except (ValueError, TypeError, ZeroDivisionError):
         new_pct = "N/A"
 
@@ -202,21 +239,40 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
         f"and sustained brand visibility across digital channels."
     )
 
-    # Para 2 — closing insight (no CTR dependency)
-    raw_para2 = (
-        f"The combination of high new-user acquisition signals continued external interest "
-        f"and strong discoverability. Overall, the website demonstrates a stable digital footprint "
-        f"driven by strong awareness metrics. The next optimisation focus can centre on improving "
-        f"engagement depth and converting this large influx of new visitors into repeat users "
-        f"and long-term brand loyalty."
+    engagement = home_metrics.get("Average engagement time per active user", "N/A")
+
+    # Para 1 — discovery / returning users insight
+    raw_para1_no_gsc = (
+        f"The high proportion of new users suggests that the platform is still in a discovery phase, "
+        f"with most traffic coming from first-time visitors rather than returning users. "
+        f"Building on this momentum through targeted retention strategies will be key to growing a loyal audience."
     )
 
+    # Para 2 — engagement insight (no CTR dependency)
+    raw_para2 = (
+        f"The average engagement time of {engagement} indicates meaningful interaction with the content. "
+        f"Users who visit the platform are spending time engaging rather than immediately exiting, "
+        f"which reflects relevant and compelling content despite the size of the audience."
+    )
+
+    # Para 3 — closing insight
+    raw_para3 = (
+        f"Overall, the data reflects strong top-of-funnel performance with effective audience acquisition "
+        f"and sustained brand visibility. The key opportunity going forward is to improve retention "
+        f"and encourage repeat visits as the platform continues to grow."
+    )
+
+    subtitle, para0, para1_no_gsc, para2, para3 = _gemini_paras_batch(
+        [raw_subtitle, raw_para0, raw_para1_no_gsc, raw_para2, raw_para3]
+    )
     return {
         "active_users_short": active_users_short,
         "new_pct": new_pct,
-        "subtitle": _gemini_para(raw_subtitle),
-        "para0": _gemini_para(raw_para0),
-        "para2": _gemini_para(raw_para2),
+        "subtitle": subtitle,
+        "para0": para0,
+        "para1_no_gsc": para1_no_gsc,
+        "para2": para2,
+        "para3": para3,
     }
 
 
@@ -263,15 +319,10 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
         f"that users are spending enough time to review key information rather than exiting immediately."
     )
 
-    return (
-        _gemini_para(raw_subtitle),
-        _gemini_para(raw_para0),
-        _gemini_para(raw_para2),
-        _gemini_para(raw_para4),
-    )
+    return tuple(_gemini_paras_batch([raw_subtitle, raw_para0, raw_para2, raw_para4]))
 
 
-def _geo_paras(countries_data: list[dict]) -> tuple[str, str, str, str]:
+def _geo_paras(countries_data: list[dict], raw_subtitle: str | None = None) -> tuple:
     """Slide 4 — returns 4 Gemini-paraphrased narrative paragraphs from real country data."""
     total_users = sum(r["users"] for r in countries_data) or 1
     sorted_rows = sorted(countries_data, key=lambda r: r["users"], reverse=True)
@@ -326,12 +377,8 @@ def _geo_paras(countries_data: list[dict]) -> tuple[str, str, str, str]:
         f"show strong engagement depth and potential conversion value."
     )
 
-    return (
-        _gemini_para(raw0),
-        _gemini_para(raw1),
-        _gemini_para(raw2),
-        _gemini_para(raw3),
-    )
+    raws = ([raw_subtitle] if raw_subtitle else []) + [raw0, raw1, raw2, raw3]
+    return tuple(_gemini_paras_batch(raws))
 
 
 _PAGE_COMPLIANCE_KEYWORDS = (
@@ -399,126 +446,161 @@ def _short_title(title: str) -> str:
     return title
 
 
+def _switch_dimension_to_page_path(page) -> None:
+    selectors = [
+        "th.cdk-column-ROW_HEADER-unifiedScreenClass-primaryDimensionColumn button[data-guidedhelpid='table-dimension-picker']",
+        "button[data-guidedhelpid='table-dimension-picker']",
+    ]
+    last_error: Exception | None = None
+
+    for selector in selectors:
+        try:
+            button = page.locator(selector).first
+            button.wait_for(state="visible", timeout=8000)
+            button.click()
+            page.wait_for_timeout(1500)
+            break
+        except Exception as exc:
+            last_error = exc
+    else:
+        raise RuntimeError("Could not open the GA4 dimension picker") from last_error
+
+    option_queries = [
+        lambda: page.get_by_role("menuitem").filter(has_text="Page path").first,
+        lambda: page.locator("button.mat-mdc-menu-item").filter(has_text="Page path").first,
+        lambda: page.locator("[role='menuitem']").filter(has_text="Page path").first,
+        lambda: page.locator("mat-option, .mat-mdc-option").filter(has_text="Page path").first,
+        lambda: page.get_by_text("Page path and screen class").first,
+    ]
+    for query in option_queries:
+        try:
+            option = query()
+            option.wait_for(state="visible", timeout=5000)
+            option.click()
+            page.wait_for_timeout(3000)
+            page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+            return
+        except Exception:
+            continue
+
+    raise RuntimeError("Could not switch the GA4 table dimension to 'Page path and screen class'")
+
+
+def _fallback_page_label(path_value: str) -> str:
+    clean = path_value.strip() or "/"
+    if clean == "/":
+        return "Homepage"
+    clean = clean.split("?", 1)[0].split("#", 1)[0].strip("/")
+    if not clean:
+        return "Homepage"
+
+    parts = [part for part in clean.split("/") if part]
+    last = parts[-1].replace("-", " ").replace("_", " ").strip()
+    if not last:
+        return "Homepage"
+    words = [word for word in last.split() if word]
+    return " ".join(word.upper() if word.isupper() else word.capitalize() for word in words[:5])
+
+
+def _label_page_paths_with_gemini(pages_data: list[dict]) -> None:
+    if not pages_data:
+        return
+
+    load_runtime_environment()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        for row in pages_data:
+            row["title"] = _fallback_page_label(row.get("path", row["title"]))
+        return
+
+    client = genai.Client(api_key=api_key)
+    path_list = "\n".join(f"- {row.get('path', row['title'])}" for row in pages_data)
+    prompt = (
+        "You are labeling website page paths for a PowerPoint report.\n"
+        "Return strict JSON only: an array of objects with keys path and label.\n"
+        "Rules:\n"
+        "- label must be 2 to 5 words\n"
+        "- use title case\n"
+        "- make each label human-friendly\n"
+        "- keep important brand/product names when obvious\n"
+        "- '/' should become 'Homepage'\n"
+        "- do not include commentary or markdown\n\n"
+        f"Paths:\n{path_list}"
+    )
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+        )
+        raw = (response.text or "").strip()
+        mappings = json.loads(raw)
+        by_path = {
+            item["path"]: item["label"].strip()
+            for item in mappings
+            if isinstance(item, dict) and item.get("path") and item.get("label")
+        }
+        for row in pages_data:
+            path_value = row.get("path", row["title"])
+            row["title"] = by_path.get(path_value, _fallback_page_label(path_value))
+    except Exception:
+        for row in pages_data:
+            row["title"] = _fallback_page_label(row.get("path", row["title"]))
+
+
 def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple[str, str, str, str]:
-    """Slide 5 — heading + 3 Gemini-paraphrased narrative paragraphs from real page data."""
+    """Slide 5 — heading + 3 narrative paragraphs from real page data."""
     if not pages_data:
         return ("", "", "", "")
 
-    # Use the real site-wide total if available, else fall back to sum of top 10
-    total_views = site_total_views if site_total_views > 0 else (sum(p["views"] for p in pages_data) or 1)
-
-    # Annotate each page with its classification and clean label
     for p in pages_data:
         p["_type"] = _classify_page(p["title"])
         raw_label = _short_title(p["title"])
-        # Home pages always get a friendly label regardless of brand name
         p["_label"] = "Homepage" if p["_type"] == "home" else raw_label
 
     top = pages_data[0]
-    top_pct = round(top["views"] / total_views * 100, 1)
-
-    # Homepage — find it regardless of position
-    homepage = next((p for p in pages_data if p["_type"] == "home"), None)
-
-    # Product pages — high commercial intent
-    product_pages = [p for p in pages_data if p["_type"] == "product"]
-
-    # Compliance pages (T&Cs etc.)
+    second = pages_data[1] if len(pages_data) > 1 else None
     compliance_pages = [p for p in pages_data if p["_type"] == "compliance"]
-
-    # Support pages
     support_pages = [p for p in pages_data if p["_type"] == "support"]
 
-    # --- Heading ---
-    if homepage and homepage != top:
-        raw_heading = (
-            f"The {top['_label']} and {homepage['_label']} pages drive the most meaningful engagement."
-        )
-    else:
-        second = pages_data[1] if len(pages_data) > 1 else None
-        raw_heading = (
-            f"The {top['_label']}"
-            + (f" and {second['_label']}" if second else "")
-            + " pages drive the most meaningful engagement."
-        )
+    raw_heading = (
+        f"The {top['_label']}"
+        + (f" and {second['_label']}" if second else "")
+        + " pages drive the most meaningful engagement."
+    )
 
-    # --- Para 1: top page + homepage context ---
-    # "Homepage" already implies "page" — avoid "The Homepage page"
     top_label_display = top['_label'] if top['_label'] != "Homepage" else "Homepage"
     page_suffix = "" if top['_label'] == "Homepage" else " page"
     raw_para1 = (
         f"The {top_label_display}{page_suffix} drives the highest traffic, accounting for "
-        f"{top_pct}% of total views ({top['views']:,} views) with {top['views_per_user']} views per active user "
-        f"and an average engagement time of {top['avg_engagement_time']}. "
+        f"{top.get('views_pct') or '0%'} of total views ({top['views']:,} views), with "
+        f"{top['views_per_user']} views per active user and an average engagement duration of "
+        f"{top['avg_engagement_time']}. This substantial volume indicates strong content discoverability and user interest."
     )
-    if top["_type"] == "compliance":
-        raw_para1 += (
-            "As a compliance or legal page, this high volume reflects strong paid media efforts "
-            "directing users to read terms before proceeding, though lower repeat visits are expected."
-        )
-    elif homepage and homepage != top:
-        h_pct = round(homepage["views"] / total_views * 100, 1)
-        raw_para1 += (
-            f"The Homepage remains a key entry point with {homepage['views']:,} views ({h_pct}% of total), "
-            f"reinforcing its role as the central navigation hub."
+
+    if compliance_pages:
+        c_parts = [f"{p['_label']} ({p.get('views_pct') or '0%'} of views)" for p in compliance_pages[:2]]
+        raw_para2 = (
+            f"Compliance pages, including {' and '.join(c_parts)}, yield considerable traffic, "
+            f"predominantly influenced by campaign landing directives over organic browsing."
         )
     else:
-        raw_para1 += "This strong volume reflects effective discoverability and user interest in the content."
-
-    # --- Para 2: product pages with browsing depth ---
-    if product_pages:
-        deep = sorted(product_pages, key=lambda p: float(p["views_per_user"]), reverse=True)[:3]
-        deep_parts = [f"{p['_label']} ({p['views_per_user']} views per user)" for p in deep]
         raw_para2 = (
-            f"Product-driven pages such as {', '.join(deep_parts)} demonstrate stronger browsing intent, "
-            f"indicating commercial interest and higher engagement quality from users actively exploring offerings."
+            f"Secondary pages such as {second['_label'] if second else 'other pages'} contribute meaningful traffic, "
+            f"but with more limited evidence of deep exploratory browsing."
         )
-    elif compliance_pages:
-        c_parts = [f"{p['_label']} ({round(p['views']/total_views*100,1)}% of views)" for p in compliance_pages[:2]]
-        raw_para2 = (
-            f"Compliance pages including {' and '.join(c_parts)} generate substantial traffic, "
-            f"typically driven by campaign landing requirements rather than organic browsing intent."
-        )
-    else:
-        second = pages_data[1] if len(pages_data) > 1 else None
-        if second:
-            s_pct = round(second["views"] / total_views * 100, 1)
-            raw_para2 = (
-                f"The {second['_label']} page accounts for {s_pct}% of total views "
-                f"with {second['views_per_user']} views per user, contributing steady secondary traffic."
-            )
-        else:
-            raw_para2 = "Secondary pages contribute consistent traffic volumes across the site."
 
-    # --- Para 3: support / low-depth pages or overall observation ---
     if support_pages:
         s_parts = [p["_label"] for p in support_pages[:2]]
         raw_para3 = (
-            f"Support-oriented pages such as {' and '.join(s_parts)} contribute steady traffic "
-            f"but are not primary drivers of repeat interaction or deep browsing behaviour."
-        )
-    elif compliance_pages and product_pages:
-        c_views = sum(p["views"] for p in compliance_pages)
-        c_pct = round(c_views / total_views * 100, 1)
-        best_product = max(product_pages, key=lambda p: float(p["views_per_user"]))
-        raw_para3 = (
-            f"Compliance pages collectively account for {c_pct}% of total views, driven primarily "
-            f"by campaign traffic rather than organic intent. In contrast, product pages such as "
-            f"{best_product['_label']} ({best_product['views_per_user']} views per user) show "
-            f"stronger browsing depth, signalling genuine commercial interest worth nurturing."
+            f"Support-focused pages including {' and '.join(s_parts)} attract consistent traffic "
+            f"but exhibit lower engagement depth, indicating they are mainly used for quick access to assistance rather than extended browsing."
         )
     else:
         raw_para3 = (
-            f"Overall, the site demonstrates a healthy page distribution with clear entry points "
-            f"and consistent user flow across key content areas."
+            f"The leading pages drive visibility and entry traffic, while the remaining pages play a more supportive role in the user journey."
         )
 
-    return (
-        _gemini_para(raw_heading),
-        _gemini_para(raw_para1),
-        _gemini_para(raw_para2),
-        _gemini_para(raw_para3),
-    )
+    return raw_heading, raw_para1, raw_para2, raw_para3
 
 
 # ---------------------------------------------------------------------------
@@ -836,14 +918,16 @@ def capture_2026(
                 _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
                 end_col = page.locator("th.cdk-column-DEFAULT-userEngagementDurationPerUser").first
+                table = page.locator("table.adv-table").first
                 row_num_col.wait_for(state="visible", timeout=10000)
                 page.keyboard.press("End")
                 page.wait_for_timeout(1000)
                 page.mouse.wheel(0, 3000)
                 page.wait_for_timeout(1000)
+                _switch_dimension_to_page_path(page)
                 start_box = row_num_col.bounding_box()
                 end_box = end_col.bounding_box()
-                table_box = page.locator("table.adv-table").bounding_box()
+                table_box = table.bounding_box()
                 clip = {
                     "x": start_box["x"],
                     "y": table_box["y"],
@@ -854,31 +938,8 @@ def capture_2026(
                 page.screenshot(path=str(path), clip=clip, full_page=True)
                 screenshots["pages_table"] = path
 
-                body = page.locator("body").inner_text()
-                import re as _re
-                # Scrape total views from the "Total" summary row first:
-                # "\tTotal\t58,165\n100% of total\t..."
-                total_m = _re.search(r"\tTotal\t([\d,]+)\n", body)
-                if total_m:
-                    site_total_views = int(total_m.group(1).replace(",", ""))
-                # Row format: "\t1\tPage Title\t9,053 (15.56%)\t5,913 (21.94%)\t1.53\t32s\t..."
-                for line in body.splitlines():
-                    m = _re.match(
-                        r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+)\t(\S+)",
-                        line,
-                    )
-                    if m and len(pages_data) < 10:
-                        title = m.group(1).strip()
-                        pages_data.append({
-                            "title": title,
-                            "views": int(m.group(2).replace(",", "")),
-                            "active_users": int(m.group(3).replace(",", "")),
-                            "views_per_user": m.group(4),
-                            "avg_engagement_time": m.group(5),
-                        })
-                        # Keep simple page_views dict for backward compat
-                        if len(page_views) < 4:
-                            page_views[title] = int(m.group(2).replace(",", ""))
+                page_views, pages_data, site_total_views = _scrape_pages_table(page)
+                _label_page_paths_with_gemini(pages_data)
             except Exception:
                 pass
 
@@ -912,7 +973,20 @@ def _performance_month(date_range: str) -> str:
     return match.group(0).replace(" ", ",") if match else ""
 
 
-def _build_slide1(slide, performance_month: str, screenshots: dict) -> None:
+# Per-template picture name for the KPI card slot on Slide 1 (right-side image).
+# "Picture 11" is always the footer logo — the KPI card is the other right-side picture.
+_SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
+    "econet":       "Picture 10",
+    "econet_ai":    "Picture 14",
+    "infraco":      "Picture 13",
+    "ecocash":      "Picture 13",
+    "zimplats":     "Picture 15",
+    "cancer_serve": "Picture 12",
+    "dicomm":       "Picture 10",
+}
+
+
+def _build_slide1(slide, performance_month: str, screenshots: dict, report_name: str = "") -> None:
     """Replace date text and KPI card screenshot on Slide 1."""
     for shape in slide.shapes:
         if not shape.has_text_frame:
@@ -922,7 +996,18 @@ def _build_slide1(slide, performance_month: str, screenshots: dict) -> None:
                 _fill_text_run(para, performance_month)
 
     if "snapshot_card" in screenshots:
-        _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name="Picture 9")
+        pic_name = _SLIDE1_KPI_CARD_PICTURE.get(report_name)
+        if pic_name:
+            _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=pic_name)
+        else:
+            # Fallback: replace the largest right-side picture (left > 5 inches)
+            EMU = 914400
+            right_pics = [
+                s for s in slide.shapes
+                if s.shape_type == 13 and s.left > 5 * EMU and s.name != "Picture 11"
+            ]
+            if right_pics:
+                _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=right_pics[0].name)
 
 
 def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, search_metrics: dict | None = None) -> None:
@@ -942,25 +1027,61 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
+
+        # KPI stat boxes — target by shape name + paragraph index (para 0 = value, para 1 = label)
+        # object 9 = Active Users, object 10 = New Visitors %, object 11 = CTR
+        if shape.name == "object 9":
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], exec_texts["active_users_short"])
+            continue
+        if shape.name == "object 10":
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], exec_texts["new_pct"])
+            continue
+        if shape.name == "object 11":
+            paras = shape.text_frame.paragraphs
+            if ctr != "N/A" and len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], ctr)
+            continue
+
         for para in shape.text_frame.paragraphs:
             text = para.text.strip()
-            # KPI boxes — replace value only, keep font
-            if re.match(r"^\d+K?$", text):
-                _fill_text_run(para, exec_texts["active_users_short"])
-            elif text.endswith("%") and "." not in text and len(text) <= 5:
-                _fill_text_run(para, exec_texts["new_pct"])
             # Subtitle line
-            elif text.lower().startswith("performance overview:"):
+            if text.lower().startswith("performance overview:"):
                 _fill_text_run(para, exec_texts["subtitle"])
-            # Para 0 — attracting / first-time users
-            elif any(kw in text.lower() for kw in ("first-time users", "under review", "attracting")):
+            # Para 0 — active users + new visitors acquisition summary
+            elif any(kw in text.lower() for kw in (
+                "under review", "attracting", "recorded", "active users",
+                "new visitors", "highlighting", "early stage visibility",
+                "first-time users", "strong proportion",
+            )):
                 _write_para_with_highlights(para, exec_texts["para0"])
-            # Para 1 — CTR / search visibility (from GSC)
-            elif para1_text and any(kw in text.lower() for kw in ("click-through", "search visibility", "organic", "ctr", "impressions")):
+            # Para 1 — discovery phase / returning users (no GSC)
+            elif any(kw in text.lower() for kw in (
+                "discovery phase", "returning users", "high proportion of new",
+                "first time visitors", "first-time visitors",
+            )):
+                _write_para_with_highlights(para, exec_texts["para1_no_gsc"])
+            # Para — CTR / search visibility (from GSC, overwrites discovery para if GSC available)
+            elif para1_text and any(kw in text.lower() for kw in (
+                "click-through", "search visibility", "organic", "ctr", "impressions",
+                "search perspective", "search console",
+            )):
                 _write_para_with_highlights(para, para1_text)
-            # Para 2 — closing insight
-            elif any(kw in text.lower() for kw in ("combination of high", "discoverability", "brand loyalty")):
+            # Para — engagement time
+            elif any(kw in text.lower() for kw in (
+                "engagement time", "minute", "seconds", "meaningful interaction",
+                "average engagement", "spending time engaging",
+            )):
                 _write_para_with_highlights(para, exec_texts["para2"])
+            # Para — closing / overall
+            elif any(kw in text.lower() for kw in (
+                "overall", "data reflects", "top of funnel", "key opportunity",
+                "combination of high", "discoverability", "brand loyalty",
+            )):
+                _write_para_with_highlights(para, exec_texts["para3"])
 
 
 def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, screenshots: dict) -> None:
@@ -987,36 +1108,57 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
+
+        # KPI stat boxes — target by shape name + paragraph index to avoid stale-text matching.
+        # Each box has: para 0 = value, para 1 = label (e.g. "Total Active Users")
+        if shape.name == "object 6":
+            # Total Active Users: replace value (para 0), leave label (para 1) as-is
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], str(active_users))
+            continue
+
+        if shape.name == "object 10":
+            # New Users: para 0 = count, para 1 = "New Users (XX%)" label — update both
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], str(new_users))
+            if len(paras) > 1 and paras[1].text.strip():
+                _fill_text_run(paras[1], f"New Users ({new_pct})")
+            continue
+
+        if shape.name == "object 14":
+            # Avg Engagement Time: para 0 = time value, para 1 = "Avg Engagement Time" label
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 0 and paras[0].text.strip():
+                _fill_text_run(paras[0], str(engagement))
+            continue
+
         for para in shape.text_frame.paragraphs:
             text = para.text.strip()
 
-            # Subtitle — Gemini paraphrase, same tokens
+            # Subtitle — Gemini paraphrase
             if "user engagement metrics" in text.lower():
                 _fill_text_run(para, subtitle)
 
-            # object 6 — Total Active Users value
-            elif shape.name == "object 6" and re.match(r"^[\d,]+$", text):
-                _fill_text_run(para, str(active_users))
-
-            # object 10 — New Users value + (%) label
-            elif shape.name == "object 10" and re.match(r"^[\d,]+$", text):
-                _fill_text_run(para, str(new_users))
-            elif shape.name == "object 10" and re.match(r"^\([\d.]+%\)$", text):
-                _fill_text_run(para, f"({new_pct})")
-
-            # object 14 — Avg Engagement Time value
-            elif shape.name == "object 14" and re.match(r"^[\d]+\w+$", text):
-                _fill_text_run(para, str(engagement))
-
             # Narrative paragraphs — Gemini paraphrase with highlights
-            elif any(kw in text.lower() for kw in ("reflects solid", "active users recorded", "encouraging performance")):
+            elif any(kw in text.lower() for kw in (
+                "reflects solid", "active users recorded", "encouraging performance",
+                "active users", "new visitors", "recorded during",
+            )):
                 _write_para_with_highlights(para, para0)
-            elif any(kw in text.lower() for kw in ("consistently high proportion", "search visibility", "first-time audiences")):
+            elif any(kw in text.lower() for kw in (
+                "consistently high proportion", "search visibility", "first-time audiences",
+                "marketing efforts", "growth and discovery",
+            )):
                 _write_para_with_highlights(para, para2)
-            elif any(kw in text.lower() for kw in ("average engagement time", "engagement benchmarks", "exiting immediately")):
+            elif any(kw in text.lower() for kw in (
+                "average engagement time", "engagement benchmarks", "exiting immediately",
+                "meaningful interaction", "spending time",
+            )):
                 _write_para_with_highlights(para, para4)
 
-    # Reuse the snapshot_card screenshot using the actual picture name used by the template.
+    # Replace the snapshot card screenshot — each template uses either Picture 18 or Picture 19
     if "snapshot_card" in screenshots:
         picture_names = {
             shape.name
@@ -1035,12 +1177,9 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
         sorted_rows = sorted(countries_data, key=lambda r: r["users"], reverse=True)
         top = sorted_rows[0]
 
-        # Subtitle in object 2, para[1]
+        # Subtitle + 4 narrative paragraphs — all batched in one Gemini call via _geo_paras
         raw_subtitle = f"{top['country']} Dominance with International Opportunity"
-        subtitle = _gemini_para(raw_subtitle)
-
-        # 4 narrative paragraphs from real data
-        para0, para1, para2, para3 = _geo_paras(countries_data)
+        subtitle, para0, para1, para2, para3 = _geo_paras(countries_data, raw_subtitle=raw_subtitle)
         narratives = [para0, para1, para2, para3]
 
         # Country names to bold in narratives
@@ -1160,14 +1299,7 @@ def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
         f"indicating consistent search demand and sustained visibility."
     )
 
-    return (
-        _gemini_para(subtitle_raw),
-        _gemini_para(raw_para0),
-        _gemini_para(raw_para1),
-        _gemini_para(raw_para2),
-        # para3 kept short — same token count
-        _gemini_para(raw_para3),
-    )
+    return tuple(_gemini_paras_batch([subtitle_raw, raw_para0, raw_para1, raw_para2, raw_para3]))
 
 
 def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
@@ -1240,7 +1372,7 @@ def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str
                     report_name,
                     prev_start,
                     prev_end,
-                    Path("artifacts/screenshots/prev_period_gsc"),
+                    SCREENSHOTS_DIR / "prev_period_gsc",
                 )
             except Exception as e:
                 logger.warning("[2026] Previous-period GSC scrape failed: %s", e)
@@ -1295,14 +1427,16 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.wait_for_timeout(1000)
     start_input = page.get_by_label("Start date")
     start_input.wait_for(state="visible", timeout=10000)
-    start_input.click()
-    start_input.select_text()
+    start_input.click(click_count=3)
+    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
+    page.wait_for_timeout(200)
     start_input.fill(start_date)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
     end_input = page.get_by_label("End date")
-    end_input.click()
-    end_input.select_text()
+    end_input.click(click_count=3)
+    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
+    page.wait_for_timeout(200)
     end_input.fill(end_date)
     page.keyboard.press("Tab")
     page.wait_for_timeout(500)
@@ -1356,29 +1490,43 @@ def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
     pages_data: list[dict] = []
     site_total_views = 0
 
-    import re as _re
-
     body = page.locator("body").inner_text()
-    total_m = _re.search(r"\tTotal\t([\d,]+)\n", body)
-    if total_m:
-        site_total_views = int(total_m.group(1).replace(",", ""))
+    total_match = re.search(r"(?:^|\n)\s*Total\s*\n\s*([\d,]+)\s*\n\s*100% of total", body)
+    if total_match:
+        try:
+            site_total_views = int(total_match.group(1).replace(",", ""))
+        except ValueError:
+            site_total_views = 0
 
     for line in body.splitlines():
-        m = _re.match(
-            r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+)\t(\S+)",
-            line,
-        )
-        if m and len(pages_data) < 10:
-            title = m.group(1).strip()
+        cols = [col.strip() for col in line.split("\t") if col.strip()]
+        if not cols or len(cols) < 5 or not cols[0].isdigit() or len(pages_data) >= 10:
+            continue
+
+        title = cols[1]
+        views_match = re.match(r"^([\d,]+)", cols[2])
+        active_users_match = re.match(r"^([\d,]+)", cols[3])
+        views_pct_match = re.search(r"\(([^)]+%)\)", cols[2])
+        active_users_pct_match = re.search(r"\(([^)]+%)\)", cols[3])
+        if not views_match or not active_users_match:
+            continue
+
+        try:
+            views = int(views_match.group(1).replace(",", ""))
             pages_data.append({
                 "title": title,
-                "views": int(m.group(2).replace(",", "")),
-                "active_users": int(m.group(3).replace(",", "")),
-                "views_per_user": m.group(4),
-                "avg_engagement_time": m.group(5),
+                "path": title,
+                "views": views,
+                "views_pct": views_pct_match.group(1) if views_pct_match else "",
+                "active_users": int(active_users_match.group(1).replace(",", "")),
+                "active_users_pct": active_users_pct_match.group(1) if active_users_pct_match else "",
+                "views_per_user": cols[4],
+                "avg_engagement_time": cols[5] if len(cols) > 5 else "",
             })
             if len(page_views) < 4:
-                page_views[title] = int(m.group(2).replace(",", ""))
+                page_views[title] = views
+        except ValueError:
+            continue
 
     return page_views, pages_data, site_total_views
 
@@ -1486,8 +1634,8 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
         try:
             import pathlib as _pl
             _header_html = page.locator("thead").first.inner_html()
-            _pl.Path("artifacts/ga4_thead_debug.html").write_text(_header_html, encoding="utf-8")
-            logger.info("[2026] Dumped GA4 thead HTML → artifacts/ga4_thead_debug.html")
+            (SCREENSHOTS_DIR / "ga4_thead_debug.html").write_text(_header_html, encoding="utf-8")
+            logger.info("[2026] Dumped GA4 thead HTML → %s", SCREENSHOTS_DIR / "ga4_thead_debug.html")
         except Exception:
             pass
 
@@ -1692,20 +1840,6 @@ def _scrape_website_pages(
         context = _launch_persistent_context(p, headless=False)
         ga4_page = None
         try:
-            # Keep previous-month metrics and top-pages scraping in the same GA4 session.
-            # This avoids auth/state drift between two separate persistent contexts.
-            _stage("Scraping previous month metrics...")
-            try:
-                prev_ga4_metrics, ga4_page = _scrape_prev_metrics_with_context(context, report_name, start_date)
-                if not prev_ga4_metrics.get("home_metrics"):
-                    logger.warning(
-                        "[2026] Previous month metrics returned no data. report_name=%s start_date=%s",
-                        report_name,
-                        start_date,
-                    )
-            except Exception as e:
-                logger.warning("[2026] Previous month metrics scrape failed in shared session: %s", e)
-
             _stage("Scraping top pages from GA4...")
             top5 = _scrape_ga4_page_paths(
                 context,
@@ -1718,7 +1852,7 @@ def _scrape_website_pages(
             import urllib.parse as _up
             domain_root = _up.urlparse(base_url).netloc.split(".")[1]
 
-            screenshots_dir = out_dir = Path("artifacts/screenshots/site_pages")
+            screenshots_dir = out_dir = SCREENSHOTS_DIR / "site_pages"
             screenshots_dir.mkdir(parents=True, exist_ok=True)
 
             site_page = context.new_page()
@@ -2095,36 +2229,36 @@ def _build_recommendations_slide(
     prev_ga4_metrics: dict | None = None,
     website_pages: dict | None = None,
 ) -> None:
-    """Replace recommendations on slide 7 (object 7) with Gemini-generated content."""
-    recs = _generate_recommendations_2026(
-        report_name, home_metrics, snapshot_metrics, search_metrics, pages_data, countries_data, date_range,
-        prev_ga4_metrics=prev_ga4_metrics, website_pages=website_pages,
-    )
-    if not recs:
-        return
+    """Write placeholder text on the recommendations slide for manual completion."""
+    placeholders = [
+        ("Recommendation 1", [
+            "Add your first recommendation here.",
+            "Supporting point for recommendation 1.",
+            "Supporting point for recommendation 1.",
+        ]),
+        ("2. Recommendation 2", [
+            "Add your second recommendation here.",
+            "Supporting point for recommendation 2.",
+            "Supporting point for recommendation 2.",
+        ]),
+        ("3. Recommendation 3", [
+            "Add your third recommendation here.",
+            "Supporting point for recommendation 3.",
+            "Supporting point for recommendation 3.",
+        ]),
+    ]
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
 
-        # object 3 — subtitle: "Three Key Initiatives to Enhance Performance"
         if shape.name == "object 3":
             content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
             if content_paras:
                 _fill_text_run(content_paras[0], "Three Key Initiatives to Enhance Performance")
 
-        # object 7 — main content block
-        # Template structure (para indices):
-        #   [0]       bold, no number  → rec 1 title
-        #   [1..5]    body+bullets     → rec 1 (5 lines)
-        #   [6]       bold, "2. ..."   → rec 2 title
-        #   [7..10]   body+bullets     → rec 2 (4 lines)
-        #   [11]      bold, "3. ..."   → rec 3 title
-        #   [12..14]  body+bullets     → rec 3 (3 lines)
         elif shape.name == "object 7":
             paras = shape.text_frame.paragraphs
-            # Map: (para_index, rec_index, line_role)
-            # line_role: "title" | "bullet_N"
             layout = [
                 (0,  0, "title"),
                 (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
@@ -2136,18 +2270,18 @@ def _build_recommendations_slide(
                 (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
             ]
             for para_idx, rec_idx, role in layout:
-                if para_idx >= len(paras) or rec_idx >= len(recs):
+                if para_idx >= len(paras) or rec_idx >= len(placeholders):
                     continue
-                rec = recs[rec_idx]
+                title, bullets = placeholders[rec_idx]
                 para = paras[para_idx]
                 if role == "title":
-                    prefix = "" if rec_idx == 0 else f"{rec_idx + 1}. "
-                    _fill_text_run(para, f"{prefix}{rec['title']}")
+                    _fill_text_run(para, title)
                 else:
                     bullet_n = int(role.split("_")[1])
-                    bullets = rec.get("bullets", [])
                     if bullet_n < len(bullets):
                         _fill_text_run(para, bullets[bullet_n])
+                    else:
+                        _fill_text_run(para, "")
 
 
 # ---------------------------------------------------------------------------
@@ -2176,7 +2310,7 @@ def generate_report_2026(
     )
 
     # Step 1b: Scrape previous month metrics + visit client website pages in one browser session
-    _stage("Scraping previous month metrics + client website pages...")
+    _stage("Scraping client website pages...")
     website_pages, prev_ga4_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
 
     # Step 2: Load template
@@ -2188,19 +2322,25 @@ def generate_report_2026(
     perf_month = _performance_month(date_range)
 
     # Step 3: Build each slide
-    _stage("Building slides...")
     logger.info("[2026] Building slides for %s (%d slides)", report_name, slide_count)
 
-    _build_slide1(prs.slides[0], perf_month, screenshots)
+    _stage("Building slide 1 up to complete...")
+    _build_slide1(prs.slides[0], perf_month, screenshots, report_name=report_name)
+    _stage("Building slide 2 up to complete...")
     _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
+    _stage("Building slide 3 up to complete...")
     _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
+    _stage("Building slide 4 up to complete...")
     _build_slide4(prs.slides[3], countries_data, screenshots)
+    _stage("Building slide 5 up to complete...")
     _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views)
 
     if not is_7_slide and slide_count >= 8:
+        _stage("Building slide 6 up to complete...")
         _build_slide6(prs.slides[5], search_metrics, screenshots)
 
     rec_slide_idx = slide_count - 2
+    _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
     _build_recommendations_slide(
         prs.slides[rec_slide_idx],
         report_name, home_metrics, snapshot_metrics, search_metrics,

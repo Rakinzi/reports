@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 export type DesktopContext = {
 	apiBaseUrl: string;
@@ -43,4 +44,13 @@ export async function saveReportFromDesktop(
 	});
 
 	return true;
+}
+
+export async function openExternalUrl(url: string) {
+	if (isTauriApp()) {
+		await openUrl(url);
+		return;
+	}
+
+	window.open(url, '_blank', 'noopener,noreferrer');
 }

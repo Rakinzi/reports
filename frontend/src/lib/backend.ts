@@ -22,6 +22,8 @@ export type ChromeProfile = {
 export type SettingsState = {
 	configured: boolean;
 	gemini_api_key_set: boolean;
+	browser_available: boolean;
+	browser_path: string;
 	chrome_user_data_dir: string;
 	chrome_profile_directory: string;
 	chrome_profile_label?: string;
@@ -126,5 +128,118 @@ export async function applyEdits(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ edits }),
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Template types
+// ---------------------------------------------------------------------------
+
+export type TemplateShape = {
+	id: number;
+	template_id: number;
+	slide_index: number;
+	shape_name: string;
+	shape_type: 'text' | 'image';
+	placeholder_text: string;
+	left_emu: number | null;
+	top_emu: number | null;
+	width_emu: number | null;
+	height_emu: number | null;
+};
+
+export type ShapeMapping = {
+	shape_name: string;
+	slide_index: number;
+	field_type: string;
+	shape_type: 'text' | 'image';
+};
+
+export type TemplateConfig = {
+	id: number;
+	label: string;
+	slug: string;
+	slide_count: number;
+	ga4_property_id: string;
+	gsc_url: string;
+	is_seven_slide: number;
+	field_map: ShapeMapping[];
+	preview_dir: string | null;
+	has_field_map: boolean;
+	created_at: string;
+};
+
+export type SlideShapes = {
+	slide_index: number;
+	image_url: string | null;
+	shapes: TemplateShape[];
+};
+
+export type ReportOption = {
+	value: string;
+	label: string;
+	source: 'builtin' | 'user';
+};
+
+// ---------------------------------------------------------------------------
+// Template API helpers
+// ---------------------------------------------------------------------------
+
+export function fetchReportOptions(apiBaseUrl: string): Promise<ReportOption[]> {
+	return fetchJson<ReportOption[]>(apiBaseUrl, '/templates/report-options');
+}
+
+export function fetchTemplates(apiBaseUrl: string): Promise<TemplateConfig[]> {
+	return fetchJson<TemplateConfig[]>(apiBaseUrl, '/templates');
+}
+
+export function fetchTemplate(apiBaseUrl: string, id: number): Promise<TemplateConfig> {
+	return fetchJson<TemplateConfig>(apiBaseUrl, `/templates/${id}`);
+}
+
+export function fetchTemplateShapes(apiBaseUrl: string, id: number): Promise<SlideShapes[]> {
+	return fetchJson<SlideShapes[]>(apiBaseUrl, `/templates/${id}/shapes`);
+}
+
+export async function uploadTemplate(
+	apiBaseUrl: string,
+	file: File,
+	label: string,
+	slug: string
+): Promise<{ id: number; slug: string; slide_count: number }> {
+	const form = new FormData();
+	form.append('file', file);
+	form.append('label', label);
+	form.append('slug', slug);
+	const res = await fetch(`${apiBaseUrl}/templates/upload`, { method: 'POST', body: form });
+	if (!res.ok) {
+		let detail = `Upload failed: ${res.status}`;
+		try { const b = await res.json(); if (b?.detail) detail = b.detail; } catch { /**/ }
+		throw new Error(detail);
+	}
+	return res.json();
+}
+
+export function saveTemplateConfig(
+	apiBaseUrl: string,
+	id: number,
+	config: { ga4_property_id: string; gsc_url: string; is_seven_slide: boolean; field_map: ShapeMapping[] }
+): Promise<TemplateConfig> {
+	return fetchJson<TemplateConfig>(apiBaseUrl, `/templates/${id}/config`, {
+		method: 'PUT',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(config),
+	});
+}
+
+export async function deleteTemplate(apiBaseUrl: string, id: number): Promise<void> {
+	await fetchJson(apiBaseUrl, `/templates/${id}`, { method: 'DELETE' });
+}
+
+export function searchGa4Properties(apiBaseUrl: string, query: string): Promise<{ results: string[] }> {
+	return fetchJson<{ results: string[] }>(apiBaseUrl, '/templates/ga4-search', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify({ query }),
 	});
 }

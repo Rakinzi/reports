@@ -1,104 +1,311 @@
 """
 PPTX → PNG slide rendering and structured field extraction.
 
-Rendering uses LibreOffice headless (soffice) which must be installed on the system.
+Rendering uses python-pptx + Pillow (no external dependencies required).
 Each slide is saved as slide_0.png, slide_1.png, etc. in a report-specific directory.
+A preview.pdf is synthesised by stitching the PNGs into a multi-page PDF via Pillow.
 """
 
-import json
+import io
 import re
-import shutil
-import subprocess
 from pathlib import Path
 
+import lxml.etree as etree
+from PIL import Image, ImageDraw, ImageFont
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.oxml.ns import qn
+from pptx.util import Pt
 
 from .logging_utils import configure_logging
 from .runtime import get_slides_dir
 
 logger = configure_logging()
 
+# Render at 96 DPI — gives a 960×540 canvas for a 10×5.63 inch slide
+_DPI = 96
+_EMU_PER_INCH = 914400
 
-def _find_libreoffice() -> str | None:
-    """Return the path to the soffice binary, or None if not found."""
-    for candidate in ["soffice", "/usr/bin/soffice", "/usr/local/bin/soffice",
-                       "/Applications/LibreOffice.app/Contents/MacOS/soffice"]:
-        if shutil.which(candidate):
-            return candidate
-    return None
+# Fallback font search order
+_FONT_CANDIDATES = [
+    "C:/Windows/Fonts/arial.ttf",
+    "C:/Windows/Fonts/calibri.ttf",
+    "C:/Windows/Fonts/segoeui.ttf",
+    "/System/Library/Fonts/Helvetica.ttc",
+    "/System/Library/Fonts/SFNS.ttf",
+    "/Library/Fonts/Arial.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+]
 
 
-def render_pdf(report_id: int, pptx_path: Path) -> Path:
-    """
-    Convert a PPTX to a single PDF using LibreOffice headless.
-    Returns the path to the generated PDF file.
-    Raises RuntimeError if LibreOffice is not installed.
-    """
-    soffice = _find_libreoffice()
-    if not soffice:
-        raise RuntimeError(
-            "LibreOffice is not installed. Install it to enable slide preview. "
-            "On macOS: brew install --cask libreoffice"
-        )
+def _emu_to_px(emu: int) -> int:
+    return round(emu / _EMU_PER_INCH * _DPI)
 
-    slides_dir = get_slides_dir() / str(report_id)
-    slides_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(
-        [soffice, "--headless", "--convert-to", "pdf", "--outdir", str(slides_dir), str(pptx_path)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"LibreOffice PDF conversion failed: {result.stderr}")
+def _resolve_scheme_colors(prs: Presentation) -> dict[str, tuple[int, int, int]]:
+    """Parse the theme XML and return a mapping of scheme name → RGB tuple."""
+    colors: dict[str, tuple[int, int, int]] = {}
+    master = prs.slides[0].slide_layout.slide_master if prs.slides else None
+    if master is None:
+        return colors
+    for rel in master.part.rels.values():
+        if "theme" not in rel.reltype:
+            continue
+        try:
+            xml = etree.fromstring(rel.target_part.blob)
+        except Exception:
+            continue
+        ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+        clr_scheme = xml.find(f".//{{{ns}}}clrScheme")
+        if clr_scheme is None:
+            continue
+        for child in clr_scheme:
+            name = child.tag.split("}")[-1]  # e.g. "dk1", "lt1", "accent1"
+            rgb_el = child.find(f"{{{ns}}}srgbClr")
+            sys_el = child.find(f"{{{ns}}}sysClr")
+            if rgb_el is not None:
+                val = rgb_el.get("val", "")
+                if len(val) == 6:
+                    colors[name] = (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+            elif sys_el is not None:
+                last = sys_el.get("lastClr", "")
+                if len(last) == 6:
+                    colors[name] = (int(last[0:2], 16), int(last[2:4], 16), int(last[4:6], 16))
+        break
+    return colors
 
-    # LibreOffice outputs <stem>.pdf — rename to canonical preview.pdf
-    lo_output = slides_dir / f"{pptx_path.stem}.pdf"
-    canonical = slides_dir / "preview.pdf"
-    if lo_output.exists() and lo_output != canonical:
-        lo_output.rename(canonical)
 
-    logger.info("Rendered PDF for report_id=%s to %s", report_id, canonical)
-    return canonical
+def _get_font(size_pt: float) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size_px = max(8, round(size_pt * _DPI / 72))
+    for path in _FONT_CANDIDATES:
+        try:
+            return ImageFont.truetype(path, size_px)
+        except (OSError, IOError):
+            continue
+    return ImageFont.load_default()
+
+
+def _resolve_run_color(
+    run_el: etree._Element,
+    scheme_colors: dict[str, tuple[int, int, int]],
+    fallback: tuple[int, int, int],
+) -> tuple[int, int, int]:
+    """Return the RGB color for a text run element."""
+    rpr = run_el.find(qn("a:rPr"))
+    if rpr is None:
+        return fallback
+    solid_fill = rpr.find(qn("a:solidFill"))
+    if solid_fill is None:
+        return fallback
+    rgb_el = solid_fill.find(qn("a:srgbClr"))
+    if rgb_el is not None:
+        val = rgb_el.get("val", "")
+        if len(val) == 6:
+            return (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+    scheme_el = solid_fill.find(qn("a:schemeClr"))
+    if scheme_el is not None:
+        name = scheme_el.get("val", "")
+        return scheme_colors.get(name, fallback)
+    return fallback
+
+
+def _resolve_solid_fill_from_xml(
+    sp_el: etree._Element,
+    scheme_colors: dict[str, tuple[int, int, int]],
+) -> tuple[int, int, int, int] | None:
+    """Read solidFill directly from shape XML.
+    Returns (R, G, B, A) where A is 0-255, or None if no solid fill."""
+    sp_pr = sp_el.find(qn("p:spPr"))
+    if sp_pr is None:
+        return None
+    solid = sp_pr.find(qn("a:solidFill"))
+    if solid is None:
+        return None
+
+    rgb: tuple[int, int, int] | None = None
+    alpha = 255
+
+    rgb_el = solid.find(qn("a:srgbClr"))
+    if rgb_el is not None:
+        val = rgb_el.get("val", "")
+        if len(val) == 6:
+            rgb = (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+        # Check for alpha child (val is 0–100000, where 100000 = fully opaque)
+        alpha_el = rgb_el.find(qn("a:alpha"))
+        if alpha_el is not None:
+            alpha = round(int(alpha_el.get("val", "100000")) / 100000 * 255)
+
+    scheme_el = solid.find(qn("a:schemeClr"))
+    if scheme_el is not None and rgb is None:
+        name = scheme_el.get("val", "")
+        rgb = scheme_colors.get(name)
+        alpha_el = scheme_el.find(qn("a:alpha"))
+        if alpha_el is not None:
+            alpha = round(int(alpha_el.get("val", "100000")) / 100000 * 255)
+
+    if rgb is None:
+        return None
+    return (*rgb, alpha)
+
+
+def _render_shapes(
+    shapes,
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    scheme_colors: dict,
+) -> None:
+    """Render a collection of shapes onto img (recursive for groups)."""
+    for shape in shapes:
+        left = _emu_to_px(shape.left or 0)
+        top = _emu_to_px(shape.top or 0)
+        width = _emu_to_px(shape.width or 0)
+        height = _emu_to_px(shape.height or 0)
+
+        # --- Groups: child coords are absolute, just recurse ---
+        if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+            try:
+                _render_shapes(shape.shapes, img, draw, scheme_colors)
+            except Exception:
+                pass
+            continue
+
+        # --- Pictures ---
+        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+            try:
+                pic_img = Image.open(io.BytesIO(shape.image.blob)).convert("RGBA")
+                pic_img = pic_img.resize((max(1, width), max(1, height)), Image.LANCZOS)
+                img.paste(pic_img, (left, top), pic_img)
+            except Exception:
+                pass
+            continue
+
+        # --- Filled shapes (AUTO_SHAPE, FREEFORM, PLACEHOLDER) ---
+        fill_color = _resolve_solid_fill_from_xml(shape._element, scheme_colors)
+        if fill_color is not None:
+            r, g, b, a = fill_color
+            if a >= 250:
+                # Fully opaque — draw directly
+                draw.rectangle([left, top, left + width, top + height], fill=(r, g, b))
+            elif a > 5:
+                # Semi-transparent — composite via overlay layer
+                overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
+                ov_draw = ImageDraw.Draw(overlay)
+                ov_draw.rectangle([left, top, left + width, top + height], fill=(r, g, b, a))
+                img.paste(Image.alpha_composite(img.convert("RGBA"), overlay).convert("RGB"))
+
+        # --- Text frames ---
+        if not shape.has_text_frame:
+            continue
+        tf = shape.text_frame
+        y_cursor = top + _emu_to_px(tf.margin_top or 0)
+
+        for para in tf.paragraphs:
+            if not para.runs:
+                y_cursor += round(_DPI * 14 / 72)
+                continue
+
+            try:
+                size_pt = para.runs[0].font.size
+                size_pt = Pt(size_pt).pt if size_pt else 12.0
+            except Exception:
+                size_pt = 12.0
+
+            font = _get_font(size_pt)
+            line_height = round(size_pt * _DPI / 72 * 1.2)
+
+            full_text = "".join(r.text for r in para.runs)
+            if not full_text.strip():
+                y_cursor += line_height
+                continue
+
+            first_run_el = para.runs[0]._r
+            # When no explicit color is set, default to dark (dk1) so text is
+            # readable on light backgrounds. Slides with white-on-dark designs
+            # always set the run color explicitly in the XML.
+            text_color = _resolve_run_color(
+                first_run_el,
+                scheme_colors,
+                scheme_colors.get("dk1", (0, 0, 0)),
+            )
+
+            words = full_text.split()
+            line = ""
+            x_start = left + _emu_to_px(tf.margin_left or 0)
+            max_x = left + width - _emu_to_px(tf.margin_right or 0)
+
+            for word in words:
+                test = f"{line} {word}".strip() if line else word
+                bbox = font.getbbox(test)
+                if bbox[2] - bbox[0] <= max_x - x_start:
+                    line = test
+                else:
+                    if line and y_cursor + line_height <= top + height + line_height:
+                        draw.text((x_start, y_cursor), line, font=font, fill=text_color)
+                    y_cursor += line_height
+                    line = word
+
+            if line and y_cursor + line_height <= top + height + line_height:
+                draw.text((x_start, y_cursor), line, font=font, fill=text_color)
+            y_cursor += line_height
+
+
+def _render_slide(slide, slide_w: int, slide_h: int, scheme_colors: dict) -> Image.Image:
+    """Render a single slide to a PIL Image."""
+    # bg1 = lt1 = white in the theme, which is the slide canvas colour
+    bg_color = scheme_colors.get("lt1", (255, 255, 255))
+    img = Image.new("RGB", (slide_w, slide_h), bg_color)
+    draw = ImageDraw.Draw(img)
+    _render_shapes(slide.shapes, img, draw, scheme_colors)
+    return img
+
+
+
 
 
 def render_slides(report_id: int, pptx_path: Path) -> Path:
     """
-    Convert a PPTX to PNG images using LibreOffice headless.
+    Render a PPTX to PNG images using python-pptx + Pillow.
     Returns the directory containing slide_0.png, slide_1.png, etc.
-    Raises RuntimeError if LibreOffice is not installed.
     """
-    soffice = _find_libreoffice()
-    if not soffice:
-        raise RuntimeError(
-            "LibreOffice is not installed. Install it to enable slide preview. "
-            "On macOS: brew install --cask libreoffice"
-        )
-
     slides_dir = get_slides_dir() / str(report_id)
     slides_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(
-        [soffice, "--headless", "--convert-to", "png", "--outdir", str(slides_dir), str(pptx_path)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"LibreOffice conversion failed: {result.stderr}")
+    prs = Presentation(str(pptx_path))
+    slide_w = _emu_to_px(prs.slide_width)
+    slide_h = _emu_to_px(prs.slide_height)
+    scheme_colors = _resolve_scheme_colors(prs)
 
-    # LibreOffice names outputs: <stem>.png (single) or <stem>1.png, <stem>2.png (multi)
-    # Rename to canonical slide_0.png, slide_1.png, ...
-    stem = pptx_path.stem
-    pngs = sorted(slides_dir.glob(f"{stem}*.png"))
-    for i, png in enumerate(pngs):
-        target = slides_dir / f"slide_{i}.png"
-        if png != target:
-            png.rename(target)
+    for i, slide in enumerate(prs.slides):
+        img = _render_slide(slide, slide_w, slide_h, scheme_colors)
+        out = slides_dir / f"slide_{i}.png"
+        img.save(str(out), "PNG")
 
-    logger.info("Rendered %d slides for report_id=%s to %s", len(pngs), report_id, slides_dir)
+    logger.info("Rendered %d slides for report_id=%s to %s", len(prs.slides), report_id, slides_dir)
     return slides_dir
+
+
+def render_pdf(report_id: int, pptx_path: Path) -> Path:
+    """
+    Render a PPTX to a multi-page PDF by stitching PNG slide images via Pillow.
+    Returns the path to the generated preview.pdf.
+    """
+    slides_dir = render_slides(report_id, pptx_path)
+    pngs = sorted(slides_dir.glob("slide_*.png"), key=lambda p: int(p.stem.split("_")[1]))
+    if not pngs:
+        raise RuntimeError("No slides were rendered")
+
+    images = [Image.open(p).convert("RGB") for p in pngs]
+    canonical = slides_dir / "preview.pdf"
+    images[0].save(
+        str(canonical),
+        "PDF",
+        save_all=True,
+        append_images=images[1:],
+        resolution=_DPI,
+    )
+    logger.info("Rendered PDF preview for report_id=%s to %s", report_id, canonical)
+    return canonical
 
 
 def extract_slide_fields(pptx_path: Path) -> list[dict]:
@@ -185,6 +392,62 @@ def _label_for_field(slide_idx: int, shape_name: str, text: str) -> str | None:
         return f"Recommendation {text[0]}"
 
     return None
+
+
+def extract_all_shapes(pptx_path: Path) -> list[dict]:
+    """
+    Extract ALL shapes from every slide (text + picture) without filtering.
+    Used for the template mapping UI so the user can assign field types to each shape.
+    Returns a flat list sorted by slide_index, then top/left position.
+    """
+    prs = Presentation(str(pptx_path))
+    result = []
+
+    for slide_idx, slide in enumerate(prs.slides):
+        for shape in slide.shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                continue  # skip groups — leaf shapes are what matter for mapping
+
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                shape_type = "image"
+                placeholder_text = ""
+            elif shape.has_text_frame:
+                shape_type = "text"
+                placeholder_text = shape.text_frame.text[:120].strip()
+            else:
+                continue  # connector, table, etc. — not mappable
+
+            result.append({
+                "slide_index": slide_idx,
+                "shape_name": shape.name,
+                "shape_type": shape_type,
+                "placeholder_text": placeholder_text,
+                "left_emu": shape.left,
+                "top_emu": shape.top,
+                "width_emu": shape.width,
+                "height_emu": shape.height,
+            })
+
+    return result
+
+
+def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
+    """
+    Render all slides of a PPTX to PNG files in target_dir.
+    Unlike render_slides(), writes to an explicit directory — used for template previews
+    so they don't collide with the report-id namespace.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    prs = Presentation(str(pptx_path))
+    slide_w = _emu_to_px(prs.slide_width)
+    slide_h = _emu_to_px(prs.slide_height)
+    scheme_colors = _resolve_scheme_colors(prs)
+
+    for i, slide in enumerate(prs.slides):
+        img = _render_slide(slide, slide_w, slide_h, scheme_colors)
+        img.save(str(target_dir / f"slide_{i}.png"), "PNG")
+
+    logger.info("Rendered %d slides for template to %s", len(prs.slides), target_dir)
 
 
 def apply_field_edits(pptx_path: Path, edits: dict[str, str], output_path: Path) -> None:

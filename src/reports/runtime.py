@@ -5,6 +5,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .browser_support import find_browser_executable
+
 
 def _packaged_resources_dir() -> Path | None:
     base = getattr(sys, "_MEIPASS", None)
@@ -51,6 +53,12 @@ def get_database_path() -> Path:
 
 def get_settings_path() -> Path:
     return get_app_data_dir() / "settings.json"
+
+
+def get_user_templates_dir() -> Path:
+    path = get_app_data_dir() / "user-templates"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_managed_chrome_user_data_dir() -> Path:
@@ -113,10 +121,13 @@ def get_runtime_status() -> dict[str, str | bool]:
     chrome_user_data_dir = os.getenv("CHROME_USER_DATA_DIR") or str(get_managed_chrome_user_data_dir())
     chrome_profile_directory = os.getenv("CHROME_PROFILE_DIRECTORY") or get_managed_chrome_profile_directory()
     gemini_api_key_set = bool(os.getenv("GEMINI_API_KEY"))
+    browser_path = find_browser_executable()
 
     return {
-        "configured": gemini_api_key_set,
+        "configured": gemini_api_key_set and bool(browser_path),
         "gemini_api_key_set": gemini_api_key_set,
+        "browser_available": bool(browser_path),
+        "browser_path": browser_path or "",
         "chrome_user_data_dir": chrome_user_data_dir,
         "chrome_profile_directory": chrome_profile_directory,
         "chrome_profile_label": "App Google Session",

@@ -10,12 +10,17 @@
 		XCircle,
 		Loader2,
 		RefreshCw,
-		Settings
+		Settings,
+		Square,
+		Trash2
 	} from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
 	import { Badge } from '$lib/components/ui/badge';
 	import BootScreen from '$lib/components/BootScreen.svelte';
+	import NoData from '$lib/illustrations/NoData.svelte';
+	import Setup from '$lib/illustrations/Setup.svelte';
+	import BrowserInstallHelp from '$lib/components/BrowserInstallHelp.svelte';
 	import StatusOrb from '$lib/components/StatusOrb.svelte';
 	import GeneratingPulse from '$lib/components/GeneratingPulse.svelte';
 	import SpinnerArc from '$lib/components/SpinnerArc.svelte';
@@ -65,6 +70,8 @@
 	let settings = $state<SettingsState>({
 		configured: false,
 		gemini_api_key_set: false,
+		browser_available: false,
+		browser_path: '',
 		chrome_user_data_dir: '',
 		chrome_profile_directory: 'Default',
 		app_data_dir: ''
@@ -166,20 +173,23 @@
 	}
 
 	function retryReport(report: Report) {
-		// Parse "1 March 2026 - 30 April 2026" back to YYYY-MM-DD for the date inputs
+		// Parse "1 March 2026 - 30 April 2026" back to YYYY-MM-DD for the date inputs.
+		// Use local date components (not toISOString which is UTC) to avoid timezone off-by-one.
+		const toLocalISO = (s: string) => {
+			const d = new Date(s + ' 00:00:00');
+			if (isNaN(d.getTime())) return '';
+			const y = d.getFullYear();
+			const m = String(d.getMonth() + 1).padStart(2, '0');
+			const day = String(d.getDate()).padStart(2, '0');
+			return `${y}-${m}-${day}`;
+		};
 		const parts = report.date_range.split(' - ');
 		if (parts.length === 2) {
-			const parseToRaw = (s: string) => {
-				const d = new Date(s + ' 00:00:00');
-				if (isNaN(d.getTime())) return '';
-				return d.toISOString().slice(0, 10);
-			};
-			startDateRaw = parseToRaw(parts[0].trim());
-			endDateRaw = parseToRaw(parts[1].trim());
+			startDateRaw = toLocalISO(parts[0].trim());
+			endDateRaw = toLocalISO(parts[1].trim());
 		}
 		// Parse "03 March 2026" back to YYYY-MM-DD
-		const rd = new Date(report.report_date + ' 00:00:00');
-		reportDateRaw = isNaN(rd.getTime()) ? '' : rd.toISOString().slice(0, 10);
+		reportDateRaw = toLocalISO(report.report_date);
 		reportName = report.report_name as typeof reportName;
 		generateError = '';
 		generateOpen = true;
@@ -201,6 +211,24 @@
 		}
 
 		window.open(`${apiBaseUrl}/reports/${report.id}/download`, '_blank', 'noopener,noreferrer');
+	}
+
+	async function stopReport(id: number) {
+		try {
+			await fetchJson(apiBaseUrl, `/reports/${id}/cancel`, { method: 'POST' });
+			await refreshReports();
+		} catch (error) {
+			refreshError = error instanceof Error ? error.message : 'Could not stop the report.';
+		}
+	}
+
+	async function deleteReport(id: number) {
+		try {
+			await fetchJson(apiBaseUrl, `/reports/${id}`, { method: 'DELETE' });
+			await refreshReports();
+		} catch (error) {
+			refreshError = error instanceof Error ? error.message : 'Could not delete the report.';
+		}
 	}
 
 	function pollReport(id: number) {
@@ -254,16 +282,15 @@
 </script>
 
 <div class="flex h-full flex-col">
-	<div class="flex items-center justify-between border-b border-zinc-800 px-8 py-5">
+	<div class="flex items-center justify-between border-b border-border px-8 py-5">
 		<div>
-			<h1 class="text-xl font-semibold text-zinc-100">Dashboard</h1>
-			<p class="mt-0.5 text-sm text-zinc-400">Generate monthly reports from the bundled backend.</p>
+			<h1 class="text-xl font-semibold text-foreground">Dashboard</h1>
+			<p class="mt-0.5 text-sm text-muted-foreground">Generate monthly reports from the bundled backend.</p>
 		</div>
 		<div class="flex items-center gap-3">
 			<Button
 				variant="outline"
 				size="sm"
-				class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
 				onclick={() => void bootstrap()}
 			>
 				<RefreshCw class="mr-2 h-3.5 w-3.5" />
@@ -272,7 +299,6 @@
 			<Button
 				variant="outline"
 				size="sm"
-				class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
 				onclick={() => goto('/settings')}
 			>
 				<Settings class="mr-2 h-3.5 w-3.5" />
@@ -280,7 +306,6 @@
 			</Button>
 			<Button
 				size="sm"
-				class="bg-zinc-100 font-semibold text-zinc-900 hover:bg-zinc-200"
 				onclick={() => (generateOpen = true)}
 				disabled={!settings.configured || booting || !backendReady}
 			>
@@ -299,86 +324,92 @@
 			{#if !settings.configured}
 				<Card class="border-amber-500/20 bg-amber-500/10">
 					<CardHeader>
-						<CardTitle class="text-amber-200">Finish setup before generating reports</CardTitle>
+						<CardTitle class="text-amber-700 dark:text-amber-200">Finish setup before generating reports</CardTitle>
 					</CardHeader>
-					<CardContent class="space-y-3 text-sm text-amber-100/80">
-						<p>Add a Gemini API key and point the app at a Chrome profile already signed into GA4.</p>
-						<Button size="sm" class="bg-amber-200 text-zinc-900 hover:bg-amber-100" onclick={() => goto('/settings')}>
-							Open Settings
-						</Button>
-						<p>Application data folder: <span class="font-mono text-xs">{settings.app_data_dir}</span></p>
-					</CardContent>
-				</Card>
-			{/if}
+						<CardContent class="flex items-start gap-6 text-sm text-amber-800/80 dark:text-amber-100/80">
+							<div class="flex-1 space-y-3">
+								<p>Add a Gemini API key and make sure Google Chrome, Microsoft Edge, or Chromium is installed for the app-managed session.</p>
+								<Button size="sm" class="bg-amber-200 text-zinc-900 hover:bg-amber-100" onclick={() => goto('/settings')}>
+									Open Settings
+								</Button>
+								{#if !settings.browser_available}
+									<p>No compatible Chromium browser detected on this machine yet.</p>
+									<BrowserInstallHelp />
+								{/if}
+								<p>Application data folder: <span class="font-mono text-xs">{settings.app_data_dir}</span></p>
+							</div>
+							<Setup class="hidden shrink-0 xl:block h-24 w-24 text-amber-600/50 dark:text-amber-300/40" />
+						</CardContent>
+					</Card>
+				{/if}
 
 			{#if refreshError}
-				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-300">
 					{refreshError}
 				</div>
 			{/if}
 
 			<div class="grid grid-cols-4 gap-4">
 				{#each STAT_CARDS as stat (stat.key)}
-					<Card class="border-zinc-800 bg-zinc-900">
+					<Card>
 						<CardHeader class="flex flex-row items-center justify-between pb-2">
-							<CardTitle class="text-sm font-medium text-zinc-400">{stat.label}</CardTitle>
+							<CardTitle class="text-sm font-medium text-muted-foreground">{stat.label}</CardTitle>
 							<stat.icon class="h-4 w-4 {stat.color}" />
 						</CardHeader>
 						<CardContent>
-							<p class="text-3xl font-bold text-zinc-100">{stats[stat.key]}</p>
+							<p class="text-3xl font-bold text-foreground">{stats[stat.key]}</p>
 						</CardContent>
 					</Card>
 				{/each}
 			</div>
 
-			<Card class="border-zinc-800 bg-zinc-900">
-				<CardHeader class="border-b border-zinc-800 px-6 py-4">
-					<CardTitle class="text-base font-semibold text-zinc-100">All Reports</CardTitle>
+			<Card>
+				<CardHeader class="border-b border-border px-6 py-4">
+					<CardTitle class="text-base font-semibold text-foreground">All Reports</CardTitle>
 				</CardHeader>
 				<CardContent class="p-0">
 					{#if reports.length === 0}
 						<div class="flex flex-col items-center justify-center py-16 text-center">
-							<FileText class="mb-3 h-10 w-10 text-zinc-600" />
-							<p class="text-sm font-medium text-zinc-400">No reports yet</p>
-							<p class="mt-1 text-xs text-zinc-600">Generate your first report to get started</p>
+							<NoData class="mb-6 h-40 w-40 text-muted-foreground/30" />
+							<p class="text-sm font-medium text-muted-foreground">No reports yet</p>
+							<p class="mt-1 text-xs text-muted-foreground/60">Generate your first report to get started</p>
 						</div>
 					{:else}
 						<Table>
 							<TableHeader>
-								<TableRow class="border-zinc-800 hover:bg-transparent">
-									<TableHead class="font-medium text-zinc-400">Report</TableHead>
-									<TableHead class="font-medium text-zinc-400">Date Range</TableHead>
-									<TableHead class="font-medium text-zinc-400">Report Date</TableHead>
-									<TableHead class="font-medium text-zinc-400">Status</TableHead>
-									<TableHead class="font-medium text-zinc-400">Created</TableHead>
-									<TableHead class="text-right font-medium text-zinc-400">Actions</TableHead>
+								<TableRow class="border-border hover:bg-transparent">
+									<TableHead class="font-medium text-muted-foreground">Report</TableHead>
+									<TableHead class="font-medium text-muted-foreground">Date Range</TableHead>
+									<TableHead class="font-medium text-muted-foreground">Report Date</TableHead>
+									<TableHead class="font-medium text-muted-foreground">Status</TableHead>
+									<TableHead class="font-medium text-muted-foreground">Created</TableHead>
+									<TableHead class="text-right font-medium text-muted-foreground">Actions</TableHead>
 								</TableRow>
 							</TableHeader>
 							<TableBody>
 								{#each reports as report (report.id)}
-									<TableRow class="border-zinc-800 hover:bg-zinc-800/40">
-										<TableCell class="font-medium text-zinc-100">
+									<TableRow class="border-border">
+										<TableCell class="font-medium text-foreground">
 											{REPORT_OPTIONS.find((r) => r.value === report.report_name)?.label ?? report.report_name}
 										</TableCell>
-										<TableCell class="text-sm text-zinc-400">{report.date_range}</TableCell>
-										<TableCell class="text-sm text-zinc-400">{report.report_date}</TableCell>
+										<TableCell class="text-sm text-muted-foreground">{report.date_range}</TableCell>
+										<TableCell class="text-sm text-muted-foreground">{report.report_date}</TableCell>
 										<TableCell>
 											<div class="flex items-center gap-2">
 												<StatusOrb
 													status={report.status === 'pending' ? 'running' : report.status as 'idle' | 'completed' | 'failed'}
 													size={8}
 												/>
-												<span class="text-xs capitalize text-zinc-400">{report.status}</span>
+												<span class="text-xs capitalize text-muted-foreground">{report.status}</span>
 											</div>
 										</TableCell>
-										<TableCell class="text-xs text-zinc-500">{formatDate(report.created_at)}</TableCell>
+										<TableCell class="text-xs text-muted-foreground/70">{formatDate(report.created_at)}</TableCell>
 										<TableCell class="text-right">
 											{#if report.status === 'completed' && report.output_path}
 												<div class="flex items-center justify-end gap-2">
 													<Button
 														size="sm"
 														variant="ghost"
-														class="text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
 														onclick={() => goto(`/reports/${report.id}/preview`)}
 													>
 														Preview & Edit
@@ -386,11 +417,19 @@
 													<Button
 														size="sm"
 														variant="ghost"
-														class="text-zinc-400 hover:bg-zinc-700 hover:text-zinc-100"
 														onclick={() => void downloadReport(report)}
 													>
 														<Download class="mr-1.5 h-3.5 w-3.5" />
 														Save
+													</Button>
+													<Button
+														size="sm"
+														variant="ghost"
+														class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+														onclick={() => void deleteReport(report.id)}
+														title="Delete report"
+													>
+														<Trash2 class="h-3.5 w-3.5" />
 													</Button>
 												</div>
 											{:else if report.status === 'pending'}
@@ -399,23 +438,44 @@
 													<Button
 														size="sm"
 														variant="ghost"
-														class="h-6 px-2 text-xs text-zinc-500 hover:bg-zinc-700 hover:text-zinc-300"
+														class="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
 														onclick={() => goto('/logs')}
 													>
 														Logs
 													</Button>
+													<Button
+														size="sm"
+														variant="ghost"
+														class="h-6 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+														onclick={() => void stopReport(report.id)}
+														title="Stop generation"
+													>
+														<Square class="mr-1 h-3 w-3 fill-current" />
+														Stop
+													</Button>
 												</div>
 											{:else if report.status === 'failed'}
-												<Button
-													size="sm"
-													variant="ghost"
-													class="text-red-400 hover:bg-red-500/10 hover:text-red-300"
-													title={report.error ?? 'Report failed'}
-													onclick={() => retryReport(report)}
-												>
-													<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
-													Retry
-												</Button>
+												<div class="flex items-center justify-end gap-2">
+													<Button
+														size="sm"
+														variant="ghost"
+														class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+														title={report.error ?? 'Report failed'}
+														onclick={() => retryReport(report)}
+													>
+														<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
+														Retry
+													</Button>
+													<Button
+														size="sm"
+														variant="ghost"
+														class="text-destructive hover:bg-destructive/10 hover:text-destructive"
+														onclick={() => void deleteReport(report.id)}
+														title="Delete report"
+													>
+														<Trash2 class="h-3.5 w-3.5" />
+													</Button>
+												</div>
 											{/if}
 										</TableCell>
 									</TableRow>
@@ -430,26 +490,26 @@
 </div>
 
 <Dialog bind:open={generateOpen}>
-	<DialogContent class="border-zinc-800 bg-zinc-900 text-zinc-100 sm:max-w-md">
+	<DialogContent class="sm:max-w-md">
 		<DialogHeader>
-			<DialogTitle class="text-zinc-100">Generate Report</DialogTitle>
-			<DialogDescription class="text-zinc-400">
+			<DialogTitle>Generate Report</DialogTitle>
+			<DialogDescription>
 				Fill in the date window and the backend will generate the PPTX locally.
 			</DialogDescription>
 		</DialogHeader>
 
 		<form onsubmit={handleGenerate} class="space-y-4 pt-2">
 			{#if generateError}
-				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
 					{generateError}
 				</div>
 			{/if}
 
 			<div class="space-y-2">
-				<Label class="text-zinc-300">Report</Label>
+				<Label>Report</Label>
 				<select
 					bind:value={reportName}
-					class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500"
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 				>
 					{#each REPORT_OPTIONS as opt (opt.value)}
 						<option value={opt.value}>{opt.label}</option>
@@ -459,21 +519,21 @@
 
 			<div class="grid grid-cols-2 gap-3">
 				<div class="space-y-2">
-					<Label class="text-zinc-300">Start Date</Label>
+					<Label>Start Date</Label>
 					<input
 						type="date"
 						bind:value={startDateRaw}
 						required
-						class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 [color-scheme:dark]"
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
 					/>
 				</div>
 				<div class="space-y-2">
-					<Label class="text-zinc-300">End Date</Label>
+					<Label>End Date</Label>
 					<input
 						type="date"
 						bind:value={endDateRaw}
 						required
-						class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 [color-scheme:dark]"
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
 					/>
 				</div>
 			</div>
@@ -487,19 +547,19 @@
 					<span class="date-error-text">{dateValidationError}</span>
 				</div>
 			{:else if dateRange}
-				<p class="text-xs text-zinc-500">Date range: <span class="text-zinc-400">{dateRange}</span></p>
+				<p class="text-xs text-muted-foreground">Date range: <span class="text-foreground/70">{dateRange}</span></p>
 			{/if}
 
 			<div class="space-y-2">
-				<Label class="text-zinc-300">Report Date</Label>
+				<Label>Report Date</Label>
 				<input
 					type="date"
 					bind:value={reportDateRaw}
 					required
-					class="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500 [color-scheme:dark]"
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
 				/>
 				{#if reportDate}
-					<p class="text-xs text-zinc-500">Formatted: <span class="text-zinc-400">{reportDate}</span></p>
+					<p class="text-xs text-muted-foreground">Formatted: <span class="text-foreground/70">{reportDate}</span></p>
 				{/if}
 			</div>
 
@@ -507,7 +567,6 @@
 				<Button
 					type="button"
 					variant="outline"
-					class="border-zinc-700 bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
 					onclick={() => (generateOpen = false)}
 					disabled={generating}
 				>
@@ -515,11 +574,10 @@
 				</Button>
 				<Button
 					type="submit"
-					class="bg-zinc-100 font-semibold text-zinc-900 hover:bg-zinc-200"
 					disabled={generating || !!dateValidationError}
 				>
 					{#if generating}
-						<span class="mr-2 inline-flex"><SpinnerArc size={16} stroke={2} color="#18181b" /></span>
+						<span class="mr-2 inline-flex"><SpinnerArc size={16} stroke={2} color="currentColor" /></span>
 						Generating...
 					{:else}
 						Generate

@@ -1,28 +1,30 @@
 import datetime as dt
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Literal
 
 _GA4_DATE_FMT = "%b %d, %Y"  # e.g. "Feb 1, 2026"
 
-
-ReportName = Literal[
-    "econet",
-    "econet_ai",
-    "infraco",
-    "ecocash",
-    "ecosure",
-    "zimplats",
-    "cancer_serve",
-    "dicomm",
-]
+HARDCODED_REPORT_NAMES: frozenset[str] = frozenset({
+    "econet", "econet_ai", "infraco", "ecocash",
+    "ecosure", "zimplats", "cancer_serve", "dicomm",
+})
 
 
 class GenerateReportRequest(BaseModel):
-    report_name: ReportName
+    report_name: str
     date_range: str          # e.g. "1 February 2026 - 28 February 2026"
     report_date: str         # e.g. "03 March 2026"
     start_date: str          # GA4 picker format e.g. "Feb 1, 2026"
     end_date: str            # GA4 picker format e.g. "Feb 28, 2026"
+
+    @field_validator("report_name")
+    @classmethod
+    def report_name_must_exist(cls, v: str) -> str:
+        if v in HARDCODED_REPORT_NAMES:
+            return v
+        from .db import get_template_by_slug
+        if get_template_by_slug(v) is None:
+            raise ValueError(f"Unknown report name '{v}' — not a hardcoded report and no uploaded template found")
+        return v
 
     @field_validator("start_date", "end_date")
     @classmethod

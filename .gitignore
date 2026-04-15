@@ -22,6 +22,12 @@ __pycache__/
 
 # Artifacts — generated at runtime, never commit
 artifacts/
+dump_*.html
+dump_*.txt
+snapshot_screenshot.png
+test_slide*.pptx
+test_slides_*.pptx
+slide*_images/
 
 # Frontend generated files
 frontend/node_modules/

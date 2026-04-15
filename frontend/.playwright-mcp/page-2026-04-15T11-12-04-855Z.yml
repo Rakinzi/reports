@@ -1,0 +1,194 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e4]:
+        - link "unDraw" [ref=e6] [cursor=pointer]:
+          - /url: /illustrations
+          - img [ref=e7]
+          - text: unDraw
+        - navigation "Main" [ref=e14]:
+          - list [ref=e16]:
+            - listitem [ref=e17]:
+              - link "❤️ Supporters" [ref=e18] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+            - listitem [ref=e19]:
+              - button "More" [ref=e20] [cursor=pointer]:
+                - text: More
+                - img [ref=e21]
+        - generic [ref=e24]:
+          - link "Search" [ref=e25] [cursor=pointer]:
+            - /url: /search
+          - button "Current color preview - Click to open color picker" [ref=e26] [cursor=pointer]
+          - button [ref=e28] [cursor=pointer]:
+            - img [ref=e29]
+    - banner [ref=e31]:
+      - generic [ref=e32]:
+        - heading "Illustrations page 2" [level=1] [ref=e33]:
+          - text: Illustrations
+          - generic [ref=e34]: page 2
+        - paragraph [ref=e35]: Continue browsing to find artwork you like, with the color you prefer and click to download.
+    - generic [ref=e36]:
+      - button "Image Comparison" [ref=e37] [cursor=pointer]:
+        - img [ref=e41]
+        - generic [ref=e81]: Image Comparison
+      - button "Coding Assistant" [ref=e82] [cursor=pointer]:
+        - img [ref=e86]
+        - generic [ref=e117]: Coding Assistant
+      - button "Target Audience" [ref=e118] [cursor=pointer]:
+        - img [ref=e122]
+        - generic [ref=e158]: Target Audience
+      - button "Calculator" [ref=e159] [cursor=pointer]:
+        - img [ref=e163]
+        - generic [ref=e203]: Calculator
+      - button "Goals" [ref=e204] [cursor=pointer]:
+        - img [ref=e208]
+        - generic [ref=e259]: Goals
+      - button "Progressive Web App" [ref=e260] [cursor=pointer]:
+        - img [ref=e264]
+        - generic [ref=e314]: Progressive Web App
+      - button "Reading" [ref=e315] [cursor=pointer]:
+        - img [ref=e319]
+        - generic [ref=e339]: Reading
+      - button "Unidentified Flying Object" [ref=e340] [cursor=pointer]:
+        - img [ref=e344]
+        - generic [ref=e354]: Unidentified Flying Object
+      - button "Leave a Review" [ref=e355] [cursor=pointer]:
+        - img [ref=e359]
+        - generic [ref=e386]: Leave a Review
+      - button "Message Sent" [ref=e387] [cursor=pointer]:
+        - img [ref=e391]
+        - generic [ref=e401]: Message Sent
+      - button "Drag to Add" [ref=e402] [cursor=pointer]:
+        - img [ref=e406]
+        - generic [ref=e424]: Drag to Add
+      - button "Web Search" [ref=e425] [cursor=pointer]:
+        - img [ref=e429]
+        - generic [ref=e459]: Web Search
+      - button "Successful Upload" [ref=e460] [cursor=pointer]:
+        - img [ref=e464]
+        - generic [ref=e486]: Successful Upload
+      - button "Creative Designer" [ref=e487] [cursor=pointer]:
+        - img [ref=e491]
+        - generic [ref=e539]: Creative Designer
+      - button "Toy Car" [ref=e540] [cursor=pointer]:
+        - img [ref=e544]
+        - generic [ref=e569]: Toy Car
+      - button "Online Wishes" [ref=e570] [cursor=pointer]:
+        - img [ref=e574]
+        - generic [ref=e610]: Online Wishes
+      - button "Booking" [ref=e611] [cursor=pointer]:
+        - img [ref=e615]
+        - generic [ref=e660]: Booking
+      - button "Business Decisions" [ref=e661] [cursor=pointer]:
+        - img [ref=e665]
+        - generic [ref=e758]: Business Decisions
+      - button "My App" [ref=e759] [cursor=pointer]:
+        - img [ref=e763]
+        - generic [ref=e787]: My App
+      - button "Goodbye" [ref=e788] [cursor=pointer]:
+        - img [ref=e792]
+        - generic [ref=e838]: Goodbye
+      - button "Cloudflare Dev" [ref=e839] [cursor=pointer]:
+        - img [ref=e843]
+        - generic [ref=e974]: Cloudflare Dev
+      - button "Contract" [ref=e975] [cursor=pointer]:
+        - img [ref=e979]
+        - generic [ref=e1025]: Contract
+      - button "Feeling Happy" [ref=e1026] [cursor=pointer]:
+        - img [ref=e1030]
+        - generic [ref=e1093]: Feeling Happy
+      - button "Mobile Post" [ref=e1094] [cursor=pointer]:
+        - img [ref=e1098]
+        - generic [ref=e1136]: Mobile Post
+      - button "Remote Meeting" [ref=e1137] [cursor=pointer]:
+        - img [ref=e1141]
+        - generic [ref=e1161]: Remote Meeting
+      - button "Code Contribution" [ref=e1162] [cursor=pointer]:
+        - img [ref=e1166]
+        - generic [ref=e1193]: Code Contribution
+      - button "Document Warning" [ref=e1194] [cursor=pointer]:
+        - img [ref=e1198]
+        - generic [ref=e1211]: Document Warning
+      - button "Grading Papers" [ref=e1212] [cursor=pointer]:
+        - img [ref=e1216]
+        - generic [ref=e1243]: Grading Papers
+      - button "Reminders" [ref=e1244] [cursor=pointer]:
+        - generic [ref=e1249]: Reminders
+      - button "System Update" [ref=e1250] [cursor=pointer]:
+        - img [ref=e1254]
+        - generic [ref=e1280]: System Update
+      - button "Followers" [ref=e1281] [cursor=pointer]:
+        - img [ref=e1285]
+        - generic [ref=e1354]: Followers
+      - button "Project Completed" [ref=e1355] [cursor=pointer]:
+        - img [ref=e1359]
+        - generic [ref=e1427]: Project Completed
+      - button "Counting Stars" [ref=e1428] [cursor=pointer]:
+        - img [ref=e1432]
+        - generic [ref=e1496]: Counting Stars
+      - button "Online Ad" [ref=e1497] [cursor=pointer]:
+        - img [ref=e1501]
+        - generic [ref=e1525]: Online Ad
+      - button "Social Media Carousel" [ref=e1526] [cursor=pointer]:
+        - img [ref=e1530]
+        - generic [ref=e1553]: Social Media Carousel
+      - button "Printing invoices" [ref=e1554] [cursor=pointer]:
+        - img [ref=e1558]
+        - generic [ref=e1606]: Printing invoices
+      - button "Investor Update" [ref=e1607] [cursor=pointer]:
+        - img [ref=e1611]
+        - generic [ref=e1677]: Investor Update
+      - button "Love" [ref=e1678] [cursor=pointer]:
+        - img [ref=e1682]
+        - generic [ref=e1724]: Love
+      - button "Image Filter" [ref=e1725] [cursor=pointer]:
+        - img [ref=e1729]
+        - generic [ref=e1767]: Image Filter
+      - button "Declaration of Love" [ref=e1768] [cursor=pointer]:
+        - img [ref=e1772]
+        - generic [ref=e1801]: Declaration of Love
+    - generic [ref=e1802]:
+      - link "Previous" [ref=e1804] [cursor=pointer]:
+        - /url: /illustrations
+        - img
+        - text: Previous
+      - generic [ref=e1805]: Page 2 of 42
+      - link "Next" [ref=e1807] [cursor=pointer]:
+        - /url: /illustrations/3
+        - text: Next
+        - img
+    - contentinfo [ref=e1808]:
+      - generic [ref=e1809]:
+        - generic [ref=e1810]:
+          - list [ref=e1812]:
+            - listitem [ref=e1813]:
+              - link "Supporters" [ref=e1814] [cursor=pointer]:
+                - /url: https://plus.undraw.co
+              - text: ·
+            - listitem [ref=e1815]:
+              - link "Thankful" [ref=e1816] [cursor=pointer]:
+                - /url: /thankful
+              - text: ·
+            - listitem [ref=e1817]:
+              - link "Twitter" [ref=e1818] [cursor=pointer]:
+                - /url: https://twitter.com/unDraw_co
+              - text: ·
+            - listitem [ref=e1819]:
+              - link "Blog" [ref=e1820] [cursor=pointer]:
+                - /url: /blog
+              - text: ·
+            - listitem [ref=e1821]:
+              - link "License" [ref=e1822] [cursor=pointer]:
+                - /url: /license
+          - paragraph [ref=e1823]: © 2026 · Katerina Limpitsouni · All rights reserved
+        - generic [ref=e1824]:
+          - paragraph [ref=e1825]:
+            - text: Created by
+            - link "Katerina Limpitsouni" [ref=e1826] [cursor=pointer]:
+              - /url: https://twitter.com/ninalimpi
+          - paragraph [ref=e1827]:
+            - text: Code / Design by
+            - link "Aggelos Gesoulis" [ref=e1828] [cursor=pointer]:
+              - /url: https://twitter.com/anges244
+    - region "Notifications alt+T"
+  - alert [ref=e1829]

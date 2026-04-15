@@ -39,6 +39,36 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE reports ADD COLUMN {col} {coldef}")
             except Exception:
                 pass  # Column already exists
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                label               TEXT    NOT NULL,
+                slug                TEXT    NOT NULL UNIQUE,
+                pptx_path           TEXT    NOT NULL,
+                slide_count         INTEGER NOT NULL DEFAULT 0,
+                ga4_property_id     TEXT    NOT NULL DEFAULT '',
+                gsc_url             TEXT    NOT NULL DEFAULT '',
+                is_seven_slide      INTEGER NOT NULL DEFAULT 0,
+                field_map           TEXT    NOT NULL DEFAULT '[]',
+                preview_dir         TEXT,
+                created_at          TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS template_shapes (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id     INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+                slide_index     INTEGER NOT NULL,
+                shape_name      TEXT    NOT NULL,
+                shape_type      TEXT    NOT NULL,
+                placeholder_text TEXT   NOT NULL DEFAULT '',
+                left_emu        INTEGER,
+                top_emu         INTEGER,
+                width_emu       INTEGER,
+                height_emu      INTEGER
+            )
+        """)
         conn.commit()
 
 
@@ -108,6 +138,23 @@ def update_report_stage(report_id: int, stage: str) -> None:
         conn.commit()
 
 
+def delete_report(report_id: int) -> bool:
+    """Delete a report record. Returns True if a row was deleted."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM reports WHERE id=?", (report_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def fail_orphaned_reports() -> None:
+    """Mark any pending reports as failed on startup — they lost their worker thread."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET status='failed', error='Interrupted: app was closed during generation' WHERE status='pending'"
+        )
+        conn.commit()
+
+
 def update_report_edits(report_id: int, edits: str) -> None:
     """edits is a JSON string of {field_id: new_text}."""
     with _connect() as conn:
@@ -116,3 +163,118 @@ def update_report_edits(report_id: int, edits: str) -> None:
             (edits, report_id),
         )
         conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Template CRUD
+# ---------------------------------------------------------------------------
+
+def create_template(label: str, slug: str, pptx_path: str, slide_count: int) -> int:
+    """Insert a new template row. Returns the new id."""
+    with _connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO templates (label, slug, pptx_path, slide_count, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (label, slug, pptx_path, slide_count, datetime.utcnow().isoformat()),
+        )
+        conn.commit()
+        return cur.lastrowid
+
+
+def get_template(template_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM templates WHERE id=?", (template_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_template_by_slug(slug: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM templates WHERE slug=?", (slug,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_templates() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM templates ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+def update_template_config(
+    template_id: int,
+    ga4_property_id: str,
+    gsc_url: str,
+    is_seven_slide: bool,
+    field_map: str,
+) -> None:
+    with _connect() as conn:
+        conn.execute(
+            """
+            UPDATE templates
+            SET ga4_property_id=?, gsc_url=?, is_seven_slide=?, field_map=?
+            WHERE id=?
+            """,
+            (ga4_property_id, gsc_url, int(is_seven_slide), field_map, template_id),
+        )
+        conn.commit()
+
+
+def update_template_preview_dir(template_id: int, preview_dir: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE templates SET preview_dir=? WHERE id=?",
+            (preview_dir, template_id),
+        )
+        conn.commit()
+
+
+def delete_template(template_id: int) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM templates WHERE id=?", (template_id,))
+        conn.commit()
+        return cur.rowcount > 0
+
+
+def upsert_template_shapes(template_id: int, shapes: list[dict]) -> None:
+    """Replace all shapes for a template (delete + re-insert)."""
+    with _connect() as conn:
+        conn.execute("DELETE FROM template_shapes WHERE template_id=?", (template_id,))
+        conn.executemany(
+            """
+            INSERT INTO template_shapes
+                (template_id, slide_index, shape_name, shape_type, placeholder_text,
+                 left_emu, top_emu, width_emu, height_emu)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    template_id,
+                    s["slide_index"],
+                    s["shape_name"],
+                    s["shape_type"],
+                    s.get("placeholder_text", ""),
+                    s.get("left_emu"),
+                    s.get("top_emu"),
+                    s.get("width_emu"),
+                    s.get("height_emu"),
+                )
+                for s in shapes
+            ],
+        )
+        conn.commit()
+
+
+def list_template_shapes(template_id: int) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM template_shapes WHERE template_id=? ORDER BY slide_index, top_emu, left_emu",
+            (template_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
