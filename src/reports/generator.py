@@ -414,17 +414,81 @@ def _scrape_home_metrics(page) -> dict:
     page.wait_for_selector(".metric-container", timeout=15000)
     page.wait_for_timeout(1000)
     metrics = {}
-    cards = page.locator(".metric-container [aria-label]").all()
-    for card in cards:
-        try:
-            aria = card.get_attribute("aria-label")
-            if not aria:
-                continue
-            match = re.match(r"^(.+?)\s+([\d,\.]+(?:m \d+s|\s?s|K|M)?),?\s*", aria)
+    labels = [
+        "Active users",
+        "New users",
+        "Returning users",
+        "Average engagement time per active user",
+    ]
+
+    def _extract_metric_value(text: str, label: str) -> str | None:
+        normalized = re.sub(r"\s+", " ", text).strip()
+        patterns = [
+            rf"{re.escape(label)}\s+((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
+            rf"{re.escape(label)}[^\dA-Z]*((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
+            rf"((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\s+{re.escape(label)}\b",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized, re.IGNORECASE)
             if match:
-                metrics[match.group(1).strip()] = match.group(2).strip().rstrip(",")
+                return match.group(1).strip().rstrip(",")
+        return None
+
+    # First pass: inspect each metric card individually using both aria-label and visible text.
+    for card in page.locator(".metric-container").all():
+        try:
+            sources = [
+                card.get_attribute("aria-label") or "",
+                card.inner_text() or "",
+            ]
+            for source in sources:
+                if not source.strip():
+                    continue
+                for label in labels:
+                    if label in metrics:
+                        continue
+                    value = _extract_metric_value(source, label)
+                    if value:
+                        metrics[label] = value
         except Exception:
             continue
+
+    # Fallback: scan the full metric area text in case GA4 changed the card structure.
+    if len(metrics) < len(labels):
+        try:
+            metrics_text = page.locator(".metric-container").all_inner_texts()
+            combined = "\n".join(text for text in metrics_text if text.strip())
+            for label in labels:
+                if label in metrics:
+                    continue
+                value = _extract_metric_value(combined, label)
+                if value:
+                    metrics[label] = value
+        except Exception:
+            pass
+
+    # GA4 sometimes exposes only New/Returning user cards clearly while Active users
+    # is visually present but not labeled in accessible text. Use the exact total when
+    # it can be reconstructed from the two component counts.
+    if "Active users" not in metrics:
+        try:
+            def _parse_metric_num(value: str) -> int:
+                s = value.strip().replace(",", "")
+                if s.upper().endswith("K"):
+                    return int(float(s[:-1]) * 1000)
+                if s.upper().endswith("M"):
+                    return int(float(s[:-1]) * 1_000_000)
+                return int(float(s))
+
+            new_users = metrics.get("New users")
+            returning_users = metrics.get("Returning users")
+            if new_users and returning_users:
+                metrics["Active users"] = str(
+                    _parse_metric_num(new_users) + _parse_metric_num(returning_users)
+                )
+        except Exception:
+            pass
+
     return metrics
 
 

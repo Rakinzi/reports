@@ -7,18 +7,15 @@ FRONTEND_DIR="${ROOT_DIR}/frontend"
 TAURI_DIR="${FRONTEND_DIR}/src-tauri"
 BUNDLE_DIR="${TAURI_DIR}/target/release/bundle"
 APP_PATH="${BUNDLE_DIR}/macos/Reports.app"
-DMG_SCRIPT="${BUNDLE_DIR}/dmg/bundle_dmg.sh"
-OUTPUT_DMG="${BUNDLE_DIR}/dmg/Reports_0.1.0_x64.dmg"
+APP_VERSION="$(node -p "require('${FRONTEND_DIR}/package.json').version")"
+OUTPUT_DMG="${BUNDLE_DIR}/dmg/Reports_${APP_VERSION}_x64.dmg"
 
 if [[ ! -d "${APP_PATH}" ]]; then
 	echo "Missing app bundle: ${APP_PATH}" >&2
 	exit 1
 fi
 
-if [[ ! -x "${DMG_SCRIPT}" ]]; then
-	echo "Missing DMG script: ${DMG_SCRIPT}" >&2
-	exit 1
-fi
+mkdir -p "${BUNDLE_DIR}/dmg"
 
 STAGING_DIR="$(mktemp -d "${TMPDIR:-/tmp}/reports-dmg-stage.XXXXXX")"
 cleanup() {
@@ -27,15 +24,14 @@ cleanup() {
 trap cleanup EXIT
 
 cp -R "${APP_PATH}" "${STAGING_DIR}/Reports.app"
+ln -s /Applications "${STAGING_DIR}/Applications"
 rm -f "${OUTPUT_DMG}"
 
-"${DMG_SCRIPT}" \
-	--volname "Reports" \
-	--window-size 660 400 \
-	--icon-size 128 \
-	--icon "Reports.app" 180 170 \
-	--app-drop-link 480 170 \
-	"${OUTPUT_DMG}" \
-	"${STAGING_DIR}"
+hdiutil create \
+	-volname "Reports" \
+	-srcfolder "${STAGING_DIR}" \
+	-ov \
+	-format UDZO \
+	"${OUTPUT_DMG}"
 
 echo "Created DMG: ${OUTPUT_DMG}"

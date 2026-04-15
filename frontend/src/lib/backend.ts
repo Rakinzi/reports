@@ -1,4 +1,5 @@
 import { getDesktopContext, type DesktopContext } from '$lib/desktop';
+import { invoke } from '@tauri-apps/api/core';
 
 export type Report = {
 	id: number;
@@ -72,7 +73,26 @@ export async function waitForBackend(
 				return health;
 			}
 		} catch {
-			// keep waiting
+			if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+				try {
+					const startup = await invoke<{
+						state: string;
+						pid: number | null;
+						exit_code: number | null;
+						message: string | null;
+						recent_output: string[];
+					}>('get_backend_startup_status');
+
+					if (startup.state === 'failed') {
+						throw new Error(startup.message ?? 'The local backend process exited during startup.');
+					}
+				} catch (error) {
+					if (error instanceof Error) {
+						throw error;
+					}
+					throw new Error(String(error));
+				}
+			}
 		}
 		await new Promise((resolve) => setTimeout(resolve, intervalMs));
 	}
