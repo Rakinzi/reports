@@ -578,10 +578,10 @@ def _label_page_paths_with_gemini(pages_data: list[dict]) -> None:
             row["title"] = _fallback_page_label(row.get("path", row["title"]))
 
 
-def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple[str, str, str, str]:
-    """Slide 5 — heading + 3 narrative paragraphs from real page data."""
+def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple[str, str, str, str, str, str]:
+    """Slide 5 — heading + 5 narrative paragraphs from real page data."""
     if not pages_data:
-        return ("", "", "", "")
+        return ("", "", "", "", "", "")
 
     for p in pages_data:
         p["_type"] = _classify_page_from_row(p)
@@ -627,14 +627,51 @@ def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple
         s_parts = [p["_label"] for p in support_pages[:2]]
         raw_para3 = (
             f"Support-focused pages including {' and '.join(s_parts)} attract consistent traffic "
-            f"but exhibit lower engagement depth, indicating they are mainly used for quick access to assistance rather than extended browsing."
+            f"but exhibit lower engagement depth, indicating they are mainly used for quick access "
+            f"to assistance rather than extended browsing."
         )
     else:
         raw_para3 = (
-            f"The leading pages drive visibility and entry traffic, while the remaining pages play a more supportive role in the user journey."
+            f"The leading pages drive visibility and entry traffic, while the remaining pages play "
+            f"a more supportive role in the user journey."
         )
 
-    return raw_heading, raw_para1, raw_para2, raw_para3
+    # Para 4 — highest engagement depth pages (by views_per_user)
+    def _parse_float(val: str) -> float:
+        try:
+            return float(str(val).replace(",", ""))
+        except (ValueError, TypeError):
+            return 0.0
+
+    deep_pages = sorted(
+        [p for p in pages_data if _parse_float(p.get("views_per_user", "0")) > 1.0],
+        key=lambda p: _parse_float(p.get("views_per_user", "0")),
+        reverse=True,
+    )[:3]
+    if deep_pages:
+        deep_parts = [
+            f"{p['_label']} ({p['views_per_user']} views per user)"
+            for p in deep_pages
+        ]
+        raw_para4 = (
+            f"Pages with the deepest browsing engagement include {', '.join(deep_parts)}, "
+            f"indicating stronger exploration intent and higher content value for those visitors."
+        )
+    else:
+        raw_para4 = (
+            f"Product and service pages show deeper per-user interaction, indicating visitors "
+            f"exploring core offerings are more engaged than those landing on support or contact pages."
+        )
+
+    # Para 5 — overall summary
+    total_label = f"{site_total_views:,} total views" if site_total_views else "total views recorded"
+    raw_para5 = (
+        f"Overall, with {total_label} across all pages, traffic is largely driven by core solution "
+        f"pages with strong top-of-funnel acquisition, while opportunities remain to improve engagement "
+        f"depth and guide users more effectively through key conversion journeys."
+    )
+
+    return raw_heading, raw_para1, raw_para2, raw_para3, raw_para4, raw_para5
 
 
 # ---------------------------------------------------------------------------
@@ -1253,7 +1290,7 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
 def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0) -> None:
     """Replace pages table screenshot and narratives on Slide 5 (Page Performance)."""
     if pages_data:
-        heading, para1, para2, para3 = _page_perf_paras(pages_data, site_total_views)
+        heading, para1, para2, para3, para4, para5 = _page_perf_paras(pages_data, site_total_views)
         # Collect clean page labels for bolding (classification already ran inside _page_perf_paras)
         page_names = {p.get("_label", p["title"].split(" - ")[0].strip()) for p in pages_data}
 
@@ -1267,14 +1304,20 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
                 if content_paras:
                     _fill_text_run(content_paras[0], heading)
 
-            # object 7 — "Overall Insight:" label + 3 narrative paragraphs
+            # object 7 — "Overall Insight:" label + up to 5 narrative paragraphs
             elif shape.name == "object 7":
-                content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
-                narratives = [para1, para2, para3]
-                # para[0] is the "Overall Insight:" label — leave it, fill paras[1:]
-                for i, para in enumerate(content_paras[1:]):
+                # All paragraphs including spacers; content slots sit at odd indices (1,3,5,7,9)
+                all_paras = shape.text_frame.paragraphs
+                narratives = [para1, para2, para3, para4, para5]
+                # Odd-indexed paragraphs are the content slots (index 0 is the label)
+                content_slots = [p for i, p in enumerate(all_paras) if i % 2 == 1]
+                for i, para in enumerate(content_slots):
                     if i < len(narratives):
                         _write_para_with_highlights(para, narratives[i], bold_words=page_names)
+                    else:
+                        # Clear any leftover text from a previous run in unused slots
+                        for run in para.runs:
+                            run.text = ""
 
     if "pages_table" in screenshots:
         picture_names = {
