@@ -40,19 +40,21 @@
 		TableHeader,
 		TableRow
 	} from '$lib/components/ui/table';
-	import { fetchJson, resolveBackendContext, type Report, type SettingsState, waitForBackend } from '$lib/backend';
+	import { fetchJson, fetchReportOptions, resolveBackendContext, type Report, type ReportOption, type SettingsState, waitForBackend } from '$lib/backend';
 	import { saveReportFromDesktop } from '$lib/desktop';
 
-	const REPORT_OPTIONS = [
-		{ value: 'econet_ai', label: 'Econet AI' },
-		{ value: 'econet', label: 'Econet' },
-		{ value: 'infraco', label: 'Infraco' },
-		{ value: 'ecocash', label: 'EcoCash' },
-		{ value: 'ecosure', label: 'Ecosure' },
-		{ value: 'zimplats', label: 'Zimplats' },
-		{ value: 'cancer_serve', label: 'Cancer Serve' },
-		{ value: 'dicomm', label: 'Dicomm McCann' }
+	const FALLBACK_REPORT_OPTIONS: ReportOption[] = [
+		{ value: 'econet_ai', label: 'Econet AI', source: 'builtin' },
+		{ value: 'econet', label: 'Econet', source: 'builtin' },
+		{ value: 'infraco', label: 'Infraco', source: 'builtin' },
+		{ value: 'ecocash', label: 'Eco Cash', source: 'builtin' },
+		{ value: 'ecosure', label: 'Ecosure', source: 'builtin' },
+		{ value: 'zimplats', label: 'Zimplats', source: 'builtin' },
+		{ value: 'cancer_serve', label: 'Cancer Serve', source: 'builtin' },
+		{ value: 'dicomm', label: 'Dicomm McCann', source: 'builtin' }
 	];
+
+	let reportOptions = $state<ReportOption[]>(FALLBACK_REPORT_OPTIONS);
 
 	const STAT_CARDS = [
 		{ label: 'Total Reports', key: 'total', icon: FileText, color: 'text-zinc-400' },
@@ -165,6 +167,11 @@
 			backendReady = true;
 			await loadSettings();
 			await refreshReports();
+			try {
+				reportOptions = await fetchReportOptions(apiBaseUrl);
+			} catch {
+				// Keep fallback options if endpoint not yet available
+			}
 		} catch (error) {
 			refreshError = error instanceof Error ? error.message : 'Could not start the desktop app.';
 		} finally {
@@ -190,7 +197,7 @@
 		}
 		// Parse "03 March 2026" back to YYYY-MM-DD
 		reportDateRaw = toLocalISO(report.report_date);
-		reportName = report.report_name as typeof reportName;
+		reportName = report.report_name;
 		generateError = '';
 		generateOpen = true;
 	}
@@ -390,7 +397,7 @@
 								{#each reports as report (report.id)}
 									<TableRow class="border-border">
 										<TableCell class="font-medium text-foreground">
-											{REPORT_OPTIONS.find((r) => r.value === report.report_name)?.label ?? report.report_name}
+											{reportOptions.find((r) => r.value === report.report_name)?.label ?? report.report_name}
 										</TableCell>
 										<TableCell class="text-sm text-muted-foreground">{report.date_range}</TableCell>
 										<TableCell class="text-sm text-muted-foreground">{report.report_date}</TableCell>
@@ -511,9 +518,16 @@
 					bind:value={reportName}
 					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 				>
-					{#each REPORT_OPTIONS as opt (opt.value)}
+					{#each reportOptions.filter((o) => o.source === 'builtin') as opt (opt.value)}
 						<option value={opt.value}>{opt.label}</option>
 					{/each}
+					{#if reportOptions.some((o) => o.source === 'user')}
+						<optgroup label="Custom Templates">
+							{#each reportOptions.filter((o) => o.source === 'user') as opt (opt.value)}
+								<option value={opt.value}>{opt.label}</option>
+							{/each}
+						</optgroup>
+					{/if}
 				</select>
 			</div>
 

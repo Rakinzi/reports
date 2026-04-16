@@ -3,7 +3,7 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { onNavigate } from '$app/navigation';
-	import { FileText, LayoutDashboard, ChevronRight, Settings, ScrollText, Sun, Moon } from '@lucide/svelte';
+	import { FileText, LayoutDashboard, ChevronRight, Settings, ScrollText, Sun, Moon, Layers } from '@lucide/svelte';
 	import { theme } from '$lib/theme.svelte';
 
 	let { children } = $props();
@@ -71,6 +71,19 @@
 				<ScrollText class="h-4 w-4" />
 				Logs
 				{#if $page.url.pathname === '/logs'}
+					<ChevronRight class="ml-auto h-3 w-3 text-muted-foreground" />
+				{/if}
+			</a>
+			<a
+				href="/templates"
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+						{$page.url.pathname.startsWith('/templates')
+						? 'bg-muted text-foreground'
+						: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+			>
+				<Layers class="h-4 w-4" />
+				Templates
+				{#if $page.url.pathname.startsWith('/templates')}
 					<ChevronRight class="ml-auto h-3 w-3 text-muted-foreground" />
 				{/if}
 			</a>
