@@ -4,7 +4,8 @@
       "Bash(rustc --version)",
       "Bash(cargo --version)",
       "Bash(pip show:*)",
-      "Bash(rustc --print host-tuple)"
+      "Bash(rustc --print host-tuple)",
+      "Bash(python -c \"from pptx import Presentation; prs = Presentation\\('src/reports/Bi weekly April WEBSITE UPDATES.pptx'\\); print\\(f'Total slides: {len\\(prs.slides\\)}'\\); [print\\(f'Slide {i+1} shapes: ' + str\\([\\(s.name, s.text_frame.text[:60] if s.has_text_frame else '[img]'\\) for s in slide.shapes][:4]\\)\\) for i, slide in enumerate\\(prs.slides\\)]\")"
     ]
   }
 }

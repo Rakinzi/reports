@@ -20,6 +20,7 @@ from .db import (
     create_template, get_template, get_template_by_slug, list_templates,
     update_template_config, update_template_preview_dir, delete_template,
     upsert_template_shapes, list_template_shapes,
+    upsert_template_sections, list_template_sections,
 )
 from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
 from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings, get_user_templates_dir
@@ -425,7 +426,13 @@ def _serialize_template(template: dict) -> dict:
         field_map = json.loads(template.get("field_map") or "[]")
     except Exception:
         field_map = []
-    return {**template, "field_map": field_map, "has_field_map": bool(field_map)}
+    property_sections = list_template_sections(template["id"])
+    return {
+        **template,
+        "field_map": field_map,
+        "has_field_map": bool(field_map),
+        "property_sections": property_sections,
+    }
 
 
 def _render_template_previews_bg(template_id: int, pptx_path: Path, preview_dir: Path) -> None:
@@ -518,12 +525,24 @@ def get_template_shapes(template_id: int):
         raise HTTPException(status_code=404, detail="Template not found")
     shapes = list_template_shapes(template_id)
     preview_dir = template.get("preview_dir")
+    slide_count: int = template.get("slide_count") or 0
 
-    # Group shapes by slide
+    # Build a dict for all slides (0..slide_count-1) so the thumbnail panel
+    # always shows every slide, not just those that have shapes.
     slides: dict[int, dict] = {}
+    for idx in range(slide_count):
+        has_image = bool(preview_dir and (Path(preview_dir) / f"slide_{idx}.png").exists())
+        slides[idx] = {
+            "slide_index": idx,
+            "image_url": f"/templates/{template_id}/slides/{idx}/image" if has_image else None,
+            "shapes": [],
+        }
+
+    # Populate shapes into their slide slots
     for shape in shapes:
         idx = shape["slide_index"]
         if idx not in slides:
+            # shape on a slide beyond slide_count (shouldn't happen, but be safe)
             has_image = bool(preview_dir and (Path(preview_dir) / f"slide_{idx}.png").exists())
             slides[idx] = {
                 "slide_index": idx,
@@ -532,7 +551,7 @@ def get_template_shapes(template_id: int):
             }
         slides[idx]["shapes"].append(shape)
 
-    return JSONResponse(list(slides.values()))
+    return JSONResponse(sorted(slides.values(), key=lambda s: s["slide_index"]))
 
 
 @app.get("/templates/{template_id}/slides/{slide_index}/image")
@@ -555,7 +574,9 @@ def put_template_config(template_id: int, body: dict):
     gsc_url = str(body.get("gsc_url", "")).strip()
     is_seven_slide = bool(body.get("is_seven_slide", False))
     field_map = body.get("field_map", [])
+    property_sections = body.get("property_sections", [])
     update_template_config(template_id, ga4_property_id, gsc_url, is_seven_slide, json.dumps(field_map))
+    upsert_template_sections(template_id, property_sections)
     updated = get_template(template_id)
     if not updated:
         raise HTTPException(status_code=404, detail="Template not found")

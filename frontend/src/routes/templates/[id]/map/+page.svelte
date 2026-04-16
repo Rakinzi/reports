@@ -17,7 +17,8 @@
 		type TemplateConfig,
 		type TemplateShape,
 		type SlideShapes,
-		type ShapeMapping
+		type ShapeMapping,
+		type TemplatePropertySection
 	} from '$lib/backend';
 	import { SvelteMap } from 'svelte/reactivity';
 	import { FIELD_TYPE_GROUPS, FIELD_TYPE_MAP } from '$lib/fieldTypes';
@@ -38,6 +39,7 @@
 	let ga4PropertyId = $state('');
 	let gscUrl = $state('');
 	let isSevenSlide = $state(false);
+	let propertySections = $state<TemplatePropertySection[]>([]);
 
 	// Shape → field_type mapping (shape_name → field_type string)
 	let mappings = $state<Record<string, string>>({});
@@ -88,6 +90,7 @@
 		ga4PropertyId = template.ga4_property_id;
 		gscUrl = template.gsc_url;
 		isSevenSlide = Boolean(template.is_seven_slide);
+		propertySections = template.property_sections ?? [];
 
 		// Initialise mapping state from existing field_map
 		const existingMap: Record<string, string> = {};
@@ -148,7 +151,8 @@
 				ga4_property_id: ga4PropertyId.trim(),
 				gsc_url: gscUrl.trim(),
 				is_seven_slide: isSevenSlide,
-				field_map
+				field_map,
+				property_sections: propertySections.map((s, i) => ({ ...s, sort_order: i }))
 			});
 			saved = true;
 			setTimeout(() => { saved = false; }, 3000);
@@ -212,36 +216,38 @@
 	{:else}
 		<div class="flex flex-1 overflow-hidden">
 			<!-- Slide thumbnail panel -->
-			<div class="flex w-56 shrink-0 flex-col gap-2 overflow-y-auto border-r border-border bg-muted/20 p-3">
+			<div class="flex w-48 shrink-0 flex-col gap-1.5 overflow-y-auto border-r border-border bg-muted/20 p-2">
 				<p class="px-1 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
 					Slides
 				</p>
 				{#each slides as slide (slide.slide_index)}
 					{@const imgUrl = slideImageUrl(slide)}
 					<button
-						class="relative overflow-hidden rounded-md border-2 transition-colors {selectedSlide === slide.slide_index
+						class="relative w-full overflow-hidden rounded-md border-2 transition-colors {selectedSlide === slide.slide_index
 							? 'border-primary'
 							: 'border-transparent hover:border-muted-foreground/30'}"
 						onclick={() => { selectedSlide = slide.slide_index; }}
 					>
-						{#if imgUrl}
-							<img
-								src={imgUrl}
-								alt="Slide {slide.slide_index + 1}"
-								class="w-full object-contain"
-							/>
-						{:else}
-							<div class="flex aspect-video w-full items-center justify-center bg-muted text-xs text-muted-foreground">
-								{#if template && !template.preview_dir}
-									<Loader2 class="h-4 w-4 animate-spin" />
-								{:else}
-									{slide.slide_index + 1}
-								{/if}
-							</div>
-						{/if}
-						<span class="absolute bottom-0 left-0 right-0 bg-black/50 px-1 py-0.5 text-center text-xs text-white">
-							Slide {slide.slide_index + 1}
-						</span>
+						<div class="relative w-full" style="aspect-ratio: 16/9;">
+							{#if imgUrl}
+								<img
+									src={imgUrl}
+									alt="Slide {slide.slide_index + 1}"
+									class="absolute inset-0 h-full w-full object-cover"
+								/>
+							{:else}
+								<div class="absolute inset-0 flex items-center justify-center bg-muted">
+									{#if template && !template.preview_dir}
+										<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+									{:else}
+										<span class="text-xs text-muted-foreground">{slide.slide_index + 1}</span>
+									{/if}
+								</div>
+							{/if}
+							<span class="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-center text-[10px] leading-tight text-white">
+								{slide.slide_index + 1}{#if slide.shapes.length > 0}<span class="ml-1 opacity-60">·{slide.shapes.length}</span>{/if}
+							</span>
+						</div>
 					</button>
 				{/each}
 			</div>
@@ -279,6 +285,115 @@
 							</label>
 						</div>
 					</div>
+				</div>
+
+				<!-- Property Sections editor -->
+				<div class="border-b border-border bg-muted/5 px-6 py-4">
+					<div class="mb-3 flex items-center justify-between">
+						<div>
+							<p class="text-sm font-semibold">Property Sections</p>
+							<p class="text-xs text-muted-foreground">
+								For combined reports — map slide ranges to different GA4 properties.
+								Leave empty to use the single property ID above.
+							</p>
+						</div>
+						<Button
+							variant="outline"
+							size="sm"
+							onclick={() => {
+								propertySections = [
+									...propertySections,
+									{
+										section_name: '',
+										start_slide: 0,
+										end_slide: 0,
+										ga4_property_id: '',
+										gsc_url: '',
+										sort_order: propertySections.length
+									}
+								];
+							}}
+						>
+							+ Add Section
+						</Button>
+					</div>
+					{#if propertySections.length > 0}
+						<div class="overflow-hidden rounded-md border border-border">
+							<table class="w-full text-sm">
+								<thead class="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
+									<tr>
+										<th class="px-3 py-2 text-left">Section Name</th>
+										<th class="px-3 py-2 text-left w-24">Start Slide</th>
+										<th class="px-3 py-2 text-left w-24">End Slide</th>
+										<th class="px-3 py-2 text-left">GA4 Property ID</th>
+										<th class="px-3 py-2 text-left">GSC URL</th>
+										<th class="px-3 py-2 w-8"></th>
+									</tr>
+								</thead>
+								<tbody class="divide-y divide-border">
+									{#each propertySections as section, i (i)}
+										<tr class="hover:bg-muted/20">
+											<td class="px-3 py-1.5">
+												<input
+													type="text"
+													bind:value={section.section_name}
+													placeholder="e.g. EcoCash"
+													class="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+												/>
+											</td>
+											<td class="px-3 py-1.5">
+												<input
+													type="number"
+													min="0"
+													bind:value={section.start_slide}
+													class="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+												/>
+											</td>
+											<td class="px-3 py-1.5">
+												<input
+													type="number"
+													min="0"
+													bind:value={section.end_slide}
+													class="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+												/>
+											</td>
+											<td class="px-3 py-1.5">
+												<input
+													type="text"
+													bind:value={section.ga4_property_id}
+													placeholder="123456789"
+													class="w-full rounded border border-input bg-background px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-ring"
+												/>
+											</td>
+											<td class="px-3 py-1.5">
+												<input
+													type="text"
+													bind:value={section.gsc_url}
+													placeholder="https://example.com"
+													class="w-full rounded border border-input bg-background px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+												/>
+											</td>
+											<td class="px-3 py-1.5 text-center">
+												<button
+													type="button"
+													onclick={() => {
+														propertySections = propertySections.filter((_, idx) => idx !== i);
+													}}
+													class="text-muted-foreground hover:text-destructive"
+													aria-label="Remove section"
+												>
+													✕
+												</button>
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						</div>
+						<p class="mt-2 text-xs text-muted-foreground">
+							Slide indices are 0-based (slide 1 = index 0). Sections should not overlap.
+						</p>
+					{/if}
 				</div>
 
 				{#if saveError}

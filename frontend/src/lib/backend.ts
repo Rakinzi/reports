@@ -180,6 +180,16 @@ export type ShapeMapping = {
 	shape_type: 'text' | 'image';
 };
 
+export type TemplatePropertySection = {
+	id?: number;
+	section_name: string;
+	start_slide: number;
+	end_slide: number;
+	ga4_property_id: string;
+	gsc_url: string;
+	sort_order: number;
+};
+
 export type TemplateConfig = {
 	id: number;
 	label: string;
@@ -189,6 +199,7 @@ export type TemplateConfig = {
 	gsc_url: string;
 	is_seven_slide: number;
 	field_map: ShapeMapping[];
+	property_sections: TemplatePropertySection[];
 	preview_dir: string | null;
 	has_field_map: boolean;
 	created_at: string;
@@ -248,7 +259,7 @@ export async function uploadTemplate(
 export function saveTemplateConfig(
 	apiBaseUrl: string,
 	id: number,
-	config: { ga4_property_id: string; gsc_url: string; is_seven_slide: boolean; field_map: ShapeMapping[] }
+	config: { ga4_property_id: string; gsc_url: string; is_seven_slide: boolean; field_map: ShapeMapping[]; property_sections: TemplatePropertySection[] }
 ): Promise<TemplateConfig> {
 	return fetchJson<TemplateConfig>(apiBaseUrl, `/templates/${id}/config`, {
 		method: 'PUT',

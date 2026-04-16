@@ -69,6 +69,18 @@ def init_db() -> None:
                 height_emu      INTEGER
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS template_property_sections (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id     INTEGER NOT NULL REFERENCES templates(id) ON DELETE CASCADE,
+                section_name    TEXT    NOT NULL DEFAULT '',
+                start_slide     INTEGER NOT NULL,
+                end_slide       INTEGER NOT NULL,
+                ga4_property_id TEXT    NOT NULL DEFAULT '',
+                gsc_url         TEXT    NOT NULL DEFAULT '',
+                sort_order      INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         conn.commit()
 
 
@@ -275,6 +287,52 @@ def list_template_shapes(template_id: int) -> list[dict]:
     with _connect() as conn:
         rows = conn.execute(
             "SELECT * FROM template_shapes WHERE template_id=? ORDER BY slide_index, top_emu, left_emu",
+            (template_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Template property sections CRUD
+# ---------------------------------------------------------------------------
+
+def upsert_template_sections(template_id: int, sections: list[dict]) -> None:
+    """Replace all property sections for a template (delete + re-insert)."""
+    with _connect() as conn:
+        conn.execute(
+            "DELETE FROM template_property_sections WHERE template_id=?",
+            (template_id,),
+        )
+        conn.executemany(
+            """
+            INSERT INTO template_property_sections
+                (template_id, section_name, start_slide, end_slide,
+                 ga4_property_id, gsc_url, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    template_id,
+                    s.get("section_name", ""),
+                    int(s["start_slide"]),
+                    int(s["end_slide"]),
+                    s.get("ga4_property_id", ""),
+                    s.get("gsc_url", ""),
+                    int(s.get("sort_order", i)),
+                )
+                for i, s in enumerate(sections)
+            ],
+        )
+        conn.commit()
+
+
+def list_template_sections(template_id: int) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM template_property_sections
+            WHERE template_id=? ORDER BY sort_order, start_slide
+            """,
             (template_id,),
         ).fetchall()
         return [dict(row) for row in rows]

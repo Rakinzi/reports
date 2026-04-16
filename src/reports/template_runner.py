@@ -4,20 +4,25 @@ Generates a report from a user-uploaded PPTX template.
 Each template has a field_map (list of ShapeMapping dicts) that tells us which
 shape on which slide holds which piece of data. We:
   1. Open GA4 with the saved Chrome session
-  2. Switch to the configured property ID
-  3. Set the date range and scrape home + snapshot metrics
-  4. Take any screenshot/chart images required by image-type mappings
-  5. Build a text_values dict for all text-type mappings (Gemini fields batched)
-  6. Copy the PPTX, walk shape mappings, and fill each shape in-place
-  7. Return the output path
+  2. For each property section (or the single default property): switch GA4 property,
+     set the date range, scrape home + snapshot metrics, capture screenshots/charts
+  3. Build text_values dict per section using Gemini (batched)
+  4. Copy the PPTX, walk shape mappings, and fill each shape with its section's data
+  5. Return the output path
+
+Multi-property (combined) reports: when property_sections are configured, each
+section defines a slide range and a GA4 property ID. Shapes on those slides get
+filled with that section's metrics. Backwards-compat: if no sections, the single
+ga4_property_id on the template row is used as before.
 """
 
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 
-from .db import get_template_by_slug
+from .db import get_template_by_slug, list_template_sections
 from .logging_utils import configure_logging
 from .runtime import get_output_dir, load_runtime_environment
 
@@ -26,6 +31,14 @@ logger = configure_logging()
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
+def _section_for_slide(sections: list[dict], slide_index: int) -> dict | None:
+    """Return the first section whose slide range contains slide_index, or None."""
+    for sec in sections:
+        if sec["start_slide"] <= slide_index <= sec["end_slide"]:
+            return sec
+    return None
+
 
 def generate_user_template(
     report_name: str,
@@ -45,16 +58,46 @@ def generate_user_template(
         raise ValueError(f"No template found for slug '{report_name}'")
 
     field_map: list[dict] = json.loads(template["field_map"] or "[]")
-    ga4_property_id: str = template["ga4_property_id"]
-    gsc_url: str = template.get("gsc_url", "")
     pptx_path = Path(template["pptx_path"])
-
-    if not ga4_property_id:
-        raise ValueError(f"Template '{report_name}' has no GA4 property ID configured")
     if not pptx_path.exists():
         raise FileNotFoundError(f"Template PPTX not found: {pptx_path}")
 
-    stage("Launching browser and switching GA4 property...")
+    sections = list_template_sections(template["id"])
+
+    # Build the list of properties to scrape.
+    # Each entry is a dict with keys: ga4_property_id, gsc_url, section_key
+    # section_key is None for the single-property fallback, or the section id.
+    if sections:
+        props_to_scrape = [
+            {
+                "ga4_property_id": s["ga4_property_id"],
+                "gsc_url": s.get("gsc_url", ""),
+                "section_key": s["id"],
+                "start_slide": s["start_slide"],
+                "end_slide": s["end_slide"],
+            }
+            for s in sections
+            if s.get("ga4_property_id")
+        ]
+        if not props_to_scrape:
+            raise ValueError(
+                f"Template '{report_name}' has property sections configured but none have a GA4 property ID"
+            )
+    else:
+        ga4_property_id: str = template.get("ga4_property_id", "")
+        if not ga4_property_id:
+            raise ValueError(f"Template '{report_name}' has no GA4 property ID configured")
+        props_to_scrape = [
+            {
+                "ga4_property_id": ga4_property_id,
+                "gsc_url": template.get("gsc_url", ""),
+                "section_key": None,
+                "start_slide": 0,
+                "end_slide": 99999,
+            }
+        ]
+
+    load_runtime_environment()
 
     from playwright.sync_api import sync_playwright
     from .generator import (
@@ -65,55 +108,86 @@ def generate_user_template(
         _scrape_snapshot_metrics,
     )
 
-    load_runtime_environment()
+    # metrics_by_key: section_key → metrics_context dict
+    metrics_by_key: dict = {}
+    # image_paths_by_key: section_key → {field_type: Path}
+    image_paths_by_key: dict = {}
 
+    n = len(props_to_scrape)
     with sync_playwright() as pw:
         ctx = _launch_persistent_context(pw)
         try:
             page = ctx.new_page()
-            page = _switch_ga4_property_by_id(page, ga4_property_id)
+            for idx, prop in enumerate(props_to_scrape):
+                pid = prop["ga4_property_id"]
+                key = prop["section_key"]
+                label = f"section {idx + 1}/{n} ({pid})" if sections else pid
 
-            stage("Setting date range and scraping GA4 home metrics...")
-            _set_date_range(page, start_date, end_date)
-            home_metrics = _scrape_home_metrics(page)
+                stage(f"Switching GA4 to property {label}...")
+                page = _switch_ga4_property_by_id(page, pid)
 
-            stage("Scraping GA4 snapshot metrics...")
-            _set_date_range(page, start_date, end_date)
-            snapshot_metrics = _scrape_snapshot_metrics(page)
+                stage(f"Scraping home metrics for {label}...")
+                _set_date_range(page, start_date, end_date)
+                home_metrics = _scrape_home_metrics(page)
 
-            stage("Collecting live acquisition and page metrics...")
-            metrics_context = _collect_live_metrics(
-                page=page,
-                ga4_property_id=ga4_property_id,
-                start_date=start_date,
-                end_date=end_date,
-                home_metrics=home_metrics,
-                snapshot_metrics=snapshot_metrics,
-            )
+                stage(f"Scraping snapshot metrics for {label}...")
+                _set_date_range(page, start_date, end_date)
+                snapshot_metrics = _scrape_snapshot_metrics(page)
 
-            stage("Capturing screenshots and charts...")
-            image_paths = _capture_image_fields(
-                page=page,
-                field_map=field_map,
-                report_name=report_name,
-                start_date=start_date,
-                end_date=end_date,
-                ga4_property_id=ga4_property_id,
-                metrics_context=metrics_context,
-            )
+                stage(f"Collecting live metrics for {label}...")
+                metrics_context = _collect_live_metrics(
+                    page=page,
+                    ga4_property_id=pid,
+                    start_date=start_date,
+                    end_date=end_date,
+                    home_metrics=home_metrics,
+                    snapshot_metrics=snapshot_metrics,
+                )
+                metrics_by_key[key] = metrics_context
+
+                # Only capture image fields whose shapes belong to this section's slide range
+                section_field_map = [
+                    m for m in field_map
+                    if prop["start_slide"] <= m.get("slide_index", 0) <= prop["end_slide"]
+                ]
+                stage(f"Capturing screenshots/charts for {label}...")
+                image_paths_by_key[key] = _capture_image_fields(
+                    page=page,
+                    field_map=section_field_map,
+                    report_name=f"{report_name}_sec{key}" if key is not None else report_name,
+                    start_date=start_date,
+                    end_date=end_date,
+                    ga4_property_id=pid,
+                    metrics_context=metrics_context,
+                )
         finally:
             ctx.close()
 
     stage("Generating text content with Gemini...")
-    text_values = _build_text_values(
-        field_map, home_metrics, snapshot_metrics,
-        date_range, report_date,
-    )
+    # Build text_values per section key
+    text_values_by_key: dict = {}
+    for prop in props_to_scrape:
+        key = prop["section_key"]
+        ctx = metrics_by_key[key]
+        section_field_map = [
+            m for m in field_map
+            if prop["start_slide"] <= m.get("slide_index", 0) <= prop["end_slide"]
+        ]
+        text_values_by_key[key] = _build_text_values(
+            section_field_map,
+            ctx["home_metrics"],
+            ctx["snapshot_metrics"],
+            date_range,
+            report_date,
+        )
 
     stage("Filling template shapes...")
     output_path = get_output_dir() / f"{report_name}-{report_date.replace(' ', '_')}.pptx"
     shutil.copy(str(pptx_path), str(output_path))
-    _fill_template(output_path, field_map, text_values, image_paths)
+    _fill_template_sections(
+        output_path, field_map, props_to_scrape, sections,
+        text_values_by_key, image_paths_by_key,
+    )
 
     logger.info("User template report generated: %s", output_path)
     return output_path
@@ -492,8 +566,15 @@ def _find_shape_by_name(slide, name: str):
     return next((s for s in slide.shapes if s.name == name), None)
 
 
-def _fill_template(output_path: Path, field_map: list[dict], text_values: dict[str, str], image_paths: dict[str, Path]) -> None:
-    """Fill all mapped shapes in the copied PPTX with their computed values."""
+def _fill_template_sections(
+    output_path: Path,
+    field_map: list[dict],
+    props_to_scrape: list[dict],
+    sections: list[dict],
+    text_values_by_key: dict,
+    image_paths_by_key: dict,
+) -> None:
+    """Fill all mapped shapes using per-section metrics."""
     from pptx import Presentation
     from .generator import _fill_text_run, _replace_image_in_slide
 
@@ -505,13 +586,24 @@ def _fill_template(output_path: Path, field_map: list[dict], text_values: dict[s
         field_type = mapping.get("field_type", "")
         shape_type = mapping.get("shape_type", "text")
 
+        if not field_type:
+            continue
         if slide_index >= len(prs.slides):
             logger.warning("Slide index %d out of range — skipping shape '%s'", slide_index, shape_name)
             continue
 
+        # Resolve which section key owns this slide
+        section_key = None
+        for prop in props_to_scrape:
+            if prop["start_slide"] <= slide_index <= prop["end_slide"]:
+                section_key = prop["section_key"]
+                break
+
+        text_values = text_values_by_key.get(section_key, {})
+        image_paths = image_paths_by_key.get(section_key, {})
+
         slide = prs.slides[slide_index]
         shape = _find_shape_by_name(slide, shape_name)
-
         if shape is None:
             logger.warning("Shape '%s' not found in slide %d — skipping", shape_name, slide_index)
             continue
