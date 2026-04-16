@@ -13,7 +13,7 @@
 		"test:unit": "vitest",
 		"test": "npm run test:unit -- --run && npm run test:e2e",
 		"test:e2e": "playwright test",
-		"desktop:build-sidecar": "python3 ../scripts/build_sidecar.py",
+		"desktop:build-sidecar": "uv run python ../scripts/build_sidecar.py",
 		"tauri:dev": "tauri dev",
 		"tauri:clean": "rm -rf src-tauri/target/release/bundle src-tauri/target/release/reports-desktop || true",
 		"tauri:build": "tauri build",
