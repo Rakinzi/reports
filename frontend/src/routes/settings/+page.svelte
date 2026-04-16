@@ -35,6 +35,9 @@
 	});
 
 	let geminiApiKey = $state('');
+	let testing = $state(false);
+	let keyStatus = $state<'ok' | 'error' | null>(null);
+	let keyStatusMessage = $state('');
 
 	async function loadSettings() {
 		settings = await fetchJson<SettingsState>(apiBaseUrl, '/settings');
@@ -59,20 +62,36 @@
 		saving = true;
 		pageError = '';
 		pageMessage = '';
+		keyStatus = null;
+		keyStatusMessage = '';
+		const hadNewKey = !!geminiApiKey;
 		try {
 			settings = await fetchJson<SettingsState>(apiBaseUrl, '/settings', {
 				method: 'PUT',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					gemini_api_key: geminiApiKey
-				})
+				body: JSON.stringify({ gemini_api_key: geminiApiKey })
 			});
 			geminiApiKey = '';
 			pageMessage = 'Settings saved.';
 		} catch (error) {
 			pageError = error instanceof Error ? error.message : 'Could not save settings.';
+			return;
 		} finally {
 			saving = false;
+		}
+
+		if (hadNewKey || settings.gemini_api_key_set) {
+			testing = true;
+			try {
+				await fetchJson(apiBaseUrl, '/settings/test-gemini');
+				keyStatus = 'ok';
+				keyStatusMessage = 'API key is valid and working.';
+			} catch (error) {
+				keyStatus = 'error';
+				keyStatusMessage = error instanceof Error ? error.message : 'API key test failed.';
+			} finally {
+				testing = false;
+			}
 		}
 	}
 
@@ -190,6 +209,20 @@
 								If a key is already saved, leave this blank unless you want to replace it.
 							</p>
 						</div>
+						{#if testing}
+							<div class="flex items-center gap-2 text-sm text-muted-foreground">
+								<Loader2 class="h-3.5 w-3.5 animate-spin" />
+								Testing API key...
+							</div>
+						{:else if keyStatus === 'ok'}
+							<div class="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700 dark:text-emerald-300">
+								✓ {keyStatusMessage}
+							</div>
+						{:else if keyStatus === 'error'}
+							<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">
+								✕ {keyStatusMessage}
+							</div>
+						{/if}
 					</CardContent>
 				</Card>
 

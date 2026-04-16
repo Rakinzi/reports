@@ -127,6 +127,21 @@ def get_chrome_profiles(user_data_dir: str | None = None):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.get("/settings/test-gemini")
+def test_gemini_key():
+    load_runtime_environment()
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Gemini API key is not configured.")
+    try:
+        from google import genai as _genai
+        client = _genai.Client(api_key=api_key)
+        client.models.generate_content(model="gemini-2.5-flash", contents="Reply with OK")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @app.get("/settings/google-sign-in")
 def get_google_sign_in_status():
     return JSONResponse(auth_session_status())
