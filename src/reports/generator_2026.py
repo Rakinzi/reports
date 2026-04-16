@@ -102,52 +102,56 @@ def _gemini_para(raw: str) -> str:
 
 
 def _gemini_paras_batch(raws: list[str]) -> list[str]:
-    """Paraphrase multiple texts in a single Gemini call. Returns results in the same order."""
+    """Paraphrase multiple texts in a single Gemini call. Returns results in the same order.
+    Falls back to raw text on any API error so report generation never crashes."""
     load_runtime_environment()
     if not raws:
         return []
-    if len(raws) == 1:
-        word_count = len(raws[0].split())
-        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=(
-                f"Paraphrase the following for a professional PowerPoint report. "
-                f"Keep all numbers, percentages, and proper nouns exactly as they are. "
-                f"Use clear, formal business English. No em dashes, bullets, or markdown. "
-                f"Output must be approximately {word_count} words — do not shorten or expand. "
-                f"Output one plain paragraph only.\n\n" + raws[0]
-            ),
+    try:
+        if len(raws) == 1:
+            word_count = len(raws[0].split())
+            client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=(
+                    f"Paraphrase the following for a professional PowerPoint report. "
+                    f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+                    f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+                    f"Output must be approximately {word_count} words — do not shorten or expand. "
+                    f"Output one plain paragraph only.\n\n" + raws[0]
+                ),
+            )
+            return [resp.text.strip()]
+
+        sections = "\n\n".join(
+            f"[{i + 1}] (~{len(r.split())} words)\n{r}" for i, r in enumerate(raws)
         )
-        return [resp.text.strip()]
+        prompt = (
+            f"Paraphrase each of the following {len(raws)} numbered texts for a professional PowerPoint report. "
+            f"Keep all numbers, percentages, and proper nouns exactly as they are. "
+            f"Use clear, formal business English. No em dashes, bullets, or markdown. "
+            f"Match each text's approximate word count. "
+            f"Output ONLY the paraphrased texts, each preceded by its number in the format [1], [2], etc. "
+            f"One plain paragraph per number. No other text.\n\n"
+            + sections
+        )
+        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        raw_output = resp.text.strip()
 
-    sections = "\n\n".join(
-        f"[{i + 1}] (~{len(r.split())} words)\n{r}" for i, r in enumerate(raws)
-    )
-    prompt = (
-        f"Paraphrase each of the following {len(raws)} numbered texts for a professional PowerPoint report. "
-        f"Keep all numbers, percentages, and proper nouns exactly as they are. "
-        f"Use clear, formal business English. No em dashes, bullets, or markdown. "
-        f"Match each text's approximate word count. "
-        f"Output ONLY the paraphrased texts, each preceded by its number in the format [1], [2], etc. "
-        f"One plain paragraph per number. No other text.\n\n"
-        + sections
-    )
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-    raw_output = resp.text.strip()
+        # Parse [1] ... [2] ... sections from the response
+        import re as _re
+        parts = _re.split(r"\[(\d+)\]", raw_output)
+        result_map: dict[int, str] = {}
+        for idx in range(1, len(parts), 2):
+            num = int(parts[idx])
+            text = parts[idx + 1].strip() if idx + 1 < len(parts) else ""
+            result_map[num] = text
 
-    # Parse [1] ... [2] ... sections from the response
-    import re as _re
-    parts = _re.split(r"\[(\d+)\]", raw_output)
-    result_map: dict[int, str] = {}
-    for idx in range(1, len(parts), 2):
-        num = int(parts[idx])
-        text = parts[idx + 1].strip() if idx + 1 < len(parts) else ""
-        result_map[num] = text
-
-    # Fall back to original if parsing fails for any entry
-    return [result_map.get(i + 1, raws[i]) for i in range(len(raws))]
+        return [result_map.get(i + 1, raws[i]) for i in range(len(raws))]
+    except Exception as exc:
+        logger.warning("[2026] Gemini paraphrase failed, using raw text: %s", exc)
+        return list(raws)
 
 
 def _write_para_with_highlights(para, text: str, bold_words: set[str] | None = None) -> None:

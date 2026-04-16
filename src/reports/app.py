@@ -285,7 +285,7 @@ def get_report_preview_pdf(report_id: int):
         from .slides import render_pdf
         pdf_path = render_pdf(report_id, output_path)
         return FileResponse(str(pdf_path), media_type="application/pdf")
-    except RuntimeError as e:
+    except Exception as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
 
 

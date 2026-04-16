@@ -295,7 +295,14 @@ def render_pdf(report_id: int, pptx_path: Path) -> Path:
     if not pngs:
         raise RuntimeError("No slides were rendered")
 
-    images = [Image.open(p).convert("RGB") for p in pngs]
+    images = []
+    for p in pngs:
+        try:
+            images.append(Image.open(p).convert("RGB"))
+        except Exception as e:
+            logger.warning("Skipping unreadable slide image %s: %s", p.name, e)
+    if not images:
+        raise RuntimeError("No slide images could be read")
     canonical = slides_dir / "preview.pdf"
     images[0].save(
         str(canonical),
