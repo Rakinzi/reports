@@ -71,6 +71,8 @@ def build_sidecar(target_triple: str) -> Path:
             "pptx",
             "--collect-submodules",
             "google.genai",
+            "--collect-all",
+            "multipart",
             "--exclude-module",
             "pandas.tests",
             "--exclude-module",
