@@ -84,7 +84,12 @@ export async function waitForBackend(
 					}>('get_backend_startup_status');
 
 					if (startup.state === 'failed') {
-						throw new Error(startup.message ?? 'The local backend process exited during startup.');
+						const lines = startup.recent_output.length > 0
+							? '\n\nBackend output:\n' + startup.recent_output.join('\n')
+							: '';
+						throw new Error(
+							(startup.message ?? 'The local backend process exited during startup.') + lines
+						);
 					}
 				} catch (error) {
 					if (error instanceof Error) {
