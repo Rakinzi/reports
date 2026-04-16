@@ -650,9 +650,9 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
     end_dt   = _dt.strptime(end_date,   "%b %d, %Y")
     gsc_site = GSC_URLS[report_name]
 
-    # Format dates for the GSC date picker inputs: "3/1/2026"
-    start_picker = start_dt.strftime("%-m/%-d/%Y")
-    end_picker   = end_dt.strftime("%-m/%-d/%Y")
+    # Format dates for the GSC date picker inputs: "3/1/2026" (no leading zeros)
+    start_picker = f"{start_dt.month}/{start_dt.day}/{start_dt.year}"
+    end_picker   = f"{end_dt.month}/{end_dt.day}/{end_dt.year}"
 
     search_metrics: dict = {}
     screenshots: dict = {}
@@ -1381,7 +1381,10 @@ def _prev_month_date_range(start_date: str) -> tuple[str, str]:
     first_of_current = dt.replace(day=1)
     last_of_prev = first_of_current - timedelta(days=1)
     first_of_prev = last_of_prev.replace(day=1)
-    return first_of_prev.strftime("%b %-d, %Y"), last_of_prev.strftime("%b %-d, %Y")
+    return (
+        f"{first_of_prev.strftime('%b')} {first_of_prev.day}, {first_of_prev.year}",
+        f"{last_of_prev.strftime('%b')} {last_of_prev.day}, {last_of_prev.year}",
+    )
 
 
 def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str):
@@ -2312,19 +2315,7 @@ def _generate_recommendations_2026(
     return recs
 
 
-def _build_recommendations_slide(
-    slide,
-    report_name: str,
-    home_metrics: dict,
-    snapshot_metrics: dict,
-    search_metrics: dict,
-    pages_data: list[dict],
-    countries_data: list[dict],
-    date_range: str,
-    report_date: str,
-    prev_ga4_metrics: dict | None = None,
-    website_pages: dict | None = None,
-) -> None:
+def _build_recommendations_slide(slide) -> None:
     """Write placeholder text on the recommendations slide for manual completion."""
     placeholders = [
         ("Recommendation 1", [
@@ -2405,9 +2396,6 @@ def generate_report_2026(
         report_name, start_date, end_date, _stage_callback=_stage_callback
     )
 
-    # Step 1b: Scrape previous month metrics + visit client website pages in one browser session
-    _stage("Scraping client website pages...")
-    website_pages, prev_ga4_metrics = _scrape_website_pages(report_name, start_date, end_date, _stage_callback=_stage_callback)
 
     # Step 2: Load template
     template_path = TEMPLATES_DIR / TEMPLATES_2026[report_name]
@@ -2437,13 +2425,7 @@ def generate_report_2026(
 
     rec_slide_idx = slide_count - 2
     _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-    _build_recommendations_slide(
-        prs.slides[rec_slide_idx],
-        report_name, home_metrics, snapshot_metrics, search_metrics,
-        pages_data, countries_data, date_range, report_date,
-        prev_ga4_metrics=prev_ga4_metrics,
-        website_pages=website_pages,
-    )
+    _build_recommendations_slide(prs.slides[rec_slide_idx])
 
     # Step 4: Save
     safe_name = report_name.replace("_", "-")
