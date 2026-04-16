@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import shutil
 import threading
@@ -419,6 +420,14 @@ _SLUG_RE = re.compile(r'^[a-z0-9_]+$')
 _MAX_PPTX_BYTES = 50 * 1024 * 1024  # 50 MB
 
 
+def _serialize_template(template: dict) -> dict:
+    try:
+        field_map = json.loads(template.get("field_map") or "[]")
+    except Exception:
+        field_map = []
+    return {**template, "field_map": field_map, "has_field_map": bool(field_map)}
+
+
 def _render_template_previews_bg(template_id: int, pptx_path: Path, preview_dir: Path) -> None:
     """Background task: render slide PNGs then update preview_dir in DB."""
     try:
@@ -479,7 +488,7 @@ async def upload_template(
 
 @app.get("/templates")
 def get_templates():
-    return JSONResponse(list_templates())
+    return JSONResponse([_serialize_template(template) for template in list_templates()])
 
 
 @app.get("/templates/report-options")
@@ -499,11 +508,7 @@ def get_template_by_id(template_id: int):
     template = get_template(template_id)
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
-    try:
-        field_map = json.loads(template["field_map"])
-    except Exception:
-        field_map = []
-    return JSONResponse({**template, "field_map": field_map, "has_field_map": bool(field_map)})
+    return JSONResponse(_serialize_template(template))
 
 
 @app.get("/templates/{template_id}/shapes")
@@ -551,7 +556,10 @@ def put_template_config(template_id: int, body: dict):
     is_seven_slide = bool(body.get("is_seven_slide", False))
     field_map = body.get("field_map", [])
     update_template_config(template_id, ga4_property_id, gsc_url, is_seven_slide, json.dumps(field_map))
-    return JSONResponse(get_template(template_id))
+    updated = get_template(template_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return JSONResponse(_serialize_template(updated))
 
 
 @app.delete("/templates/{template_id}")
@@ -585,24 +593,25 @@ def search_ga4_properties(body: dict):
 
     def _do_search():
         from .generator import _launch_persistent_context, _open_analytics_root
-        import os
+        from playwright.sync_api import sync_playwright
         load_runtime_environment()
-        ctx = _launch_persistent_context()
-        try:
-            page = ctx.new_page()
-            _open_analytics_root(page)
-            # Try to find the search input and type the query
-            search_input = page.get_by_role("searchbox").first
-            search_input.wait_for(state="visible", timeout=8000)
-            search_input.click()
-            page.wait_for_timeout(300)
-            search_input.fill(query)
-            page.wait_for_timeout(2000)
-            # Collect visible option texts
-            results = page.locator('[role="option"], [role="listitem"]').all_text_contents()
-            return [r.strip() for r in results if r.strip()]
-        finally:
-            ctx.close()
+        with sync_playwright() as playwright:
+            ctx = _launch_persistent_context(playwright)
+            try:
+                page = ctx.new_page()
+                _open_analytics_root(page)
+                # Try to find the search input and type the query
+                search_input = page.get_by_role("searchbox").first
+                search_input.wait_for(state="visible", timeout=8000)
+                search_input.click()
+                page.wait_for_timeout(300)
+                search_input.fill(query)
+                page.wait_for_timeout(2000)
+                # Collect visible option texts
+                results = page.locator('[role="option"], [role="listitem"]').all_text_contents()
+                return [r.strip() for r in results if r.strip()]
+            finally:
+                ctx.close()
 
     future = _executor.submit(_do_search)
     try:

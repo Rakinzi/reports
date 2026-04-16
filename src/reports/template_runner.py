@@ -81,8 +81,26 @@ def generate_user_template(
             _set_date_range(page, start_date, end_date)
             snapshot_metrics = _scrape_snapshot_metrics(page)
 
+            stage("Collecting live acquisition and page metrics...")
+            metrics_context = _collect_live_metrics(
+                page=page,
+                ga4_property_id=ga4_property_id,
+                start_date=start_date,
+                end_date=end_date,
+                home_metrics=home_metrics,
+                snapshot_metrics=snapshot_metrics,
+            )
+
             stage("Capturing screenshots and charts...")
-            image_paths = _capture_image_fields(page, field_map, report_name, start_date, end_date)
+            image_paths = _capture_image_fields(
+                page=page,
+                field_map=field_map,
+                report_name=report_name,
+                start_date=start_date,
+                end_date=end_date,
+                ga4_property_id=ga4_property_id,
+                metrics_context=metrics_context,
+            )
         finally:
             ctx.close()
 
@@ -99,6 +117,132 @@ def generate_user_template(
 
     logger.info("User template report generated: %s", output_path)
     return output_path
+
+
+# ---------------------------------------------------------------------------
+# Live GA4 context
+# ---------------------------------------------------------------------------
+
+def _parse_metric_number(value: str | int | float | None) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+
+    normalized = str(value).strip().replace(",", "")
+    if not normalized:
+        return 0
+
+    multiplier = 1
+    suffix = normalized[-1].upper()
+    if suffix == "K":
+        multiplier = 1_000
+        normalized = normalized[:-1]
+    elif suffix == "M":
+        multiplier = 1_000_000
+        normalized = normalized[:-1]
+    elif suffix == "B":
+        multiplier = 1_000_000_000
+        normalized = normalized[:-1]
+
+    try:
+        return int(float(normalized) * multiplier)
+    except ValueError:
+        return 0
+
+
+def _restore_property_home(page, ga4_property_id: str):
+    from .generator import _switch_ga4_property_by_id
+
+    page = _switch_ga4_property_by_id(page, ga4_property_id)
+    page.wait_for_timeout(1500)
+    return page
+
+
+def _collect_weekly_active_users(page, start_date: str, end_date: str) -> dict[str, int]:
+    from .generator import _weekly_ranges, _set_date_range, _scrape_home_metrics
+
+    weekly_active_users: dict[str, int] = {}
+    for label, week_start, week_end in _weekly_ranges(start_date, end_date):
+        try:
+            _set_date_range(page, week_start, week_end)
+            metrics = _scrape_home_metrics(page)
+            weekly_active_users[label] = _parse_metric_number(metrics.get("Active users"))
+        except Exception as exc:
+            logger.warning("Could not collect weekly active users for %s: %s", label, exc)
+            weekly_active_users[label] = 0
+
+    _set_date_range(page, start_date, end_date)
+    return weekly_active_users
+
+
+def _collect_acquisition_metrics(page) -> dict[str, int]:
+    acquisition: dict[str, int] = {}
+    try:
+        page.get_by_role("button", name="View user acquisition", exact=True).click()
+        page.wait_for_timeout(4000)
+        body = page.locator("body").inner_text()
+        for line in [text.strip() for text in body.splitlines() if text.strip()]:
+            match = re.match(r"^\d+\t(.+?)\t(\d+)\s*\(", line)
+            if match:
+                acquisition[match.group(1).strip()] = int(match.group(2))
+    except Exception as exc:
+        logger.warning("Could not collect acquisition metrics: %s", exc)
+    return acquisition
+
+
+def _collect_page_views(page) -> dict[str, int]:
+    page_views: dict[str, int] = {}
+    try:
+        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page.wait_for_timeout(4000)
+        body = page.locator("body").inner_text()
+        for line in [text.strip() for text in body.splitlines() if text.strip()]:
+            match = re.match(r"^\d+\t(.+?)\t(\d+)\s*", line)
+            if match and len(page_views) < 8:
+                page_views[match.group(1).strip()] = int(match.group(2).strip())
+    except Exception as exc:
+        logger.warning("Could not collect page views: %s", exc)
+    return page_views
+
+
+def _collect_live_metrics(
+    page,
+    ga4_property_id: str,
+    start_date: str,
+    end_date: str,
+    home_metrics: dict,
+    snapshot_metrics: dict,
+) -> dict[str, dict]:
+    weekly_active_users: dict[str, int] = {}
+    acquisition: dict[str, int] = {}
+    page_views: dict[str, int] = {}
+
+    try:
+        page = _restore_property_home(page, ga4_property_id)
+        weekly_active_users = _collect_weekly_active_users(page, start_date, end_date)
+    except Exception as exc:
+        logger.warning("Could not collect weekly active users: %s", exc)
+
+    try:
+        page = _restore_property_home(page, ga4_property_id)
+        acquisition = _collect_acquisition_metrics(page)
+    except Exception as exc:
+        logger.warning("Could not collect acquisition metrics: %s", exc)
+
+    try:
+        page = _restore_property_home(page, ga4_property_id)
+        page_views = _collect_page_views(page)
+    except Exception as exc:
+        logger.warning("Could not collect page views: %s", exc)
+
+    return {
+        "home_metrics": home_metrics,
+        "snapshot_metrics": snapshot_metrics,
+        "acquisition": acquisition,
+        "page_views": page_views,
+        "weekly_active_users": weekly_active_users,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +346,15 @@ def _build_gemini_raw(field_type: str, home_metrics: dict, snapshot_metrics: dic
 # Screenshot / chart image capturing
 # ---------------------------------------------------------------------------
 
-def _capture_image_fields(page, field_map: list[dict], report_name: str, start_date: str, end_date: str) -> dict[str, Path]:
+def _capture_image_fields(
+    page,
+    field_map: list[dict],
+    report_name: str,
+    start_date: str,
+    end_date: str,
+    ga4_property_id: str,
+    metrics_context: dict[str, dict],
+) -> dict[str, Path]:
     """Return a dict of field_type → image Path for all image-type mappings."""
     image_paths: dict[str, Path] = {}
 
@@ -214,7 +366,15 @@ def _capture_image_fields(page, field_map: list[dict], report_name: str, start_d
             continue
 
         try:
-            path = _capture_single_image_field(page, ft, report_name, start_date, end_date)
+            path = _capture_single_image_field(
+                page=page,
+                field_type=ft,
+                report_name=report_name,
+                start_date=start_date,
+                end_date=end_date,
+                ga4_property_id=ga4_property_id,
+                metrics_context=metrics_context,
+            )
             if path:
                 image_paths[ft] = path
         except Exception as exc:
@@ -223,7 +383,15 @@ def _capture_image_fields(page, field_map: list[dict], report_name: str, start_d
     return image_paths
 
 
-def _capture_single_image_field(page, field_type: str, report_name: str, start_date: str, end_date: str) -> Path | None:
+def _capture_single_image_field(
+    page,
+    field_type: str,
+    report_name: str,
+    start_date: str,
+    end_date: str,
+    ga4_property_id: str,
+    metrics_context: dict[str, dict],
+) -> Path | None:
     """Capture a single screenshot or generate a chart for the given field_type."""
     from .runtime import get_screenshots_dir
     from .generator import _set_date_range
@@ -233,22 +401,32 @@ def _capture_single_image_field(page, field_type: str, report_name: str, start_d
     out_path = screenshots_dir / f"{field_type}.png"
 
     if field_type == "screenshot_snapshot_card":
+        page = _restore_property_home(page, ga4_property_id)
+        _set_date_range(page, start_date, end_date)
         page.screenshot(path=str(out_path), clip={"x": 0, "y": 0, "width": 1920, "height": 600})
     elif field_type == "screenshot_countries_table":
-        page.screenshot(path=str(out_path), clip={"x": 0, "y": 600, "width": 1920, "height": 400})
+        page = _restore_property_home(page, ga4_property_id)
+        page.get_by_text("View reports snapshot").click()
+        page.wait_for_timeout(3000)
+        page.get_by_text("View countries").click()
+        page.wait_for_timeout(4000)
+        page.screenshot(path=str(out_path), full_page=True)
     elif field_type == "screenshot_pages_table":
-        page.screenshot(path=str(out_path), clip={"x": 0, "y": 1000, "width": 1920, "height": 400})
+        page = _restore_property_home(page, ga4_property_id)
+        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page.wait_for_timeout(4000)
+        page.screenshot(path=str(out_path), full_page=True)
     elif field_type == "screenshot_search_console":
         page.screenshot(path=str(out_path))
     elif field_type.startswith("chart_"):
-        out_path = _generate_chart(field_type, page, out_path)
+        out_path = _generate_chart(field_type, out_path, metrics_context)
     else:
         return None
 
     return out_path if out_path and out_path.exists() else None
 
 
-def _generate_chart(field_type: str, page, out_path: Path) -> Path | None:
+def _generate_chart(field_type: str, out_path: Path, metrics_context: dict[str, dict]) -> Path | None:
     """Generate a chart image for a chart_ field type."""
     try:
         from .charts import (
@@ -261,18 +439,44 @@ def _generate_chart(field_type: str, page, out_path: Path) -> Path | None:
         logger.warning("charts module not available — skipping chart generation")
         return None
 
-    # Stub data — real implementations would scrape live data from the page
+    snapshot_metrics = metrics_context.get("snapshot_metrics", {})
+    acquisition = metrics_context.get("acquisition", {})
+    weekly_active_users = metrics_context.get("weekly_active_users", {})
+    page_views = metrics_context.get("page_views", {})
+
     if field_type == "chart_country_bar":
-        data = {"Zimbabwe": 55, "South Africa": 30, "Zambia": 15, "Botswana": 10, "Mozambique": 5}
+        countries = snapshot_metrics.get("countries", {})
+        data = dict(sorted(countries.items(), key=lambda item: item[1], reverse=True)[:5])
+        if not data:
+            return None
         generate_country_bar_chart(data, out_path)
     elif field_type == "chart_traffic_pie":
-        data = {"Organic Search": 60, "Direct": 25, "Referral": 15}
+        preferred_channels = [
+            "Organic Search",
+            "Direct",
+            "Referral",
+            "Organic Social",
+            "Unassigned",
+            "Paid Search",
+            "Email",
+        ]
+        data = {channel: acquisition[channel] for channel in preferred_channels if acquisition.get(channel)}
+        if not data:
+            return None
         generate_traffic_source_pie_chart(data, out_path)
     elif field_type == "chart_line":
-        data = {"Week 1": 100, "Week 2": 150, "Week 3": 130, "Week 4": 180}
+        data = {label: value for label, value in weekly_active_users.items() if value > 0}
+        if not data:
+            return None
         generate_line_chart(data, out_path)
     elif field_type == "chart_page_views_bar":
-        data = {"Home": 500, "About": 200, "Products": 350, "Contact": 100}
+        if not page_views:
+            return None
+        shortened_page_views = {}
+        for name, views in page_views.items():
+            short = name.split("-")[0].strip() if "-" in name else name
+            shortened_page_views[short or name] = views
+        data = dict(sorted(shortened_page_views.items(), key=lambda item: item[1], reverse=True)[:5])
         generate_page_views_bar_chart(data, out_path)
     else:
         return None
