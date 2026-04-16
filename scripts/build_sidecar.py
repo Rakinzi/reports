@@ -51,6 +51,7 @@ def build_sidecar(target_triple: str) -> Path:
             "--noconfirm",
             "--clean",
             "--onefile",
+            "--noconsole",
             "--name",
             "reports-api",
             "--distpath",
