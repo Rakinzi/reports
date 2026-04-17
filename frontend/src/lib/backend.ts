@@ -268,6 +268,10 @@ export function saveTemplateConfig(
 	});
 }
 
+export function rerenderTemplatePreviews(apiBaseUrl: string, id: number): Promise<{ queued: boolean }> {
+	return fetchJson<{ queued: boolean }>(apiBaseUrl, `/templates/${id}/rerender-previews`, { method: 'POST' });
+}
+
 export async function deleteTemplate(apiBaseUrl: string, id: number): Promise<void> {
 	await fetchJson(apiBaseUrl, `/templates/${id}`, { method: 'DELETE' });
 }

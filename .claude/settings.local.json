@@ -5,7 +5,13 @@
       "Bash(cargo --version)",
       "Bash(pip show:*)",
       "Bash(rustc --print host-tuple)",
-      "Bash(python -c \"from pptx import Presentation; prs = Presentation\\('src/reports/Bi weekly April WEBSITE UPDATES.pptx'\\); print\\(f'Total slides: {len\\(prs.slides\\)}'\\); [print\\(f'Slide {i+1} shapes: ' + str\\([\\(s.name, s.text_frame.text[:60] if s.has_text_frame else '[img]'\\) for s in slide.shapes][:4]\\)\\) for i, slide in enumerate\\(prs.slides\\)]\")"
+      "Bash(python -c \"from pptx import Presentation; prs = Presentation\\('src/reports/Bi weekly April WEBSITE UPDATES.pptx'\\); print\\(f'Total slides: {len\\(prs.slides\\)}'\\); [print\\(f'Slide {i+1} shapes: ' + str\\([\\(s.name, s.text_frame.text[:60] if s.has_text_frame else '[img]'\\) for s in slide.shapes][:4]\\)\\) for i, slide in enumerate\\(prs.slides\\)]\")",
+      "Bash(python3 -c \"import sys; print\\(sys.path\\)\")",
+      "Bash(python3 -c \"import comtypes; print\\('comtypes available'\\)\")",
+      "mcp__plugin_playwright_playwright__browser_navigate",
+      "mcp__plugin_playwright_playwright__browser_evaluate",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "WebSearch"
     ]
   }
 }

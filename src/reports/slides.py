@@ -22,8 +22,8 @@ from .runtime import get_slides_dir
 
 logger = configure_logging()
 
-# Render at 96 DPI — gives a 960×540 canvas for a 10×5.63 inch slide
-_DPI = 96
+# Render at 150 DPI — gives 1500×844 canvas for a 10×5.63 inch slide (sharper thumbnails)
+_DPI = 150
 _EMU_PER_INCH = 914400
 
 # Fallback font search order
@@ -250,11 +250,128 @@ def _render_shapes(
             y_cursor += line_height
 
 
+def _bg_image_from_part(part, rel_id: str, slide_w: int, slide_h: int) -> Image.Image | None:
+    """Extract and resize the background image referenced by a relationship ID."""
+    try:
+        rel = part.rels[rel_id]
+        blob = rel.target_part.blob
+        bg = Image.open(io.BytesIO(blob)).convert("RGB")
+        bg = bg.resize((slide_w, slide_h), Image.LANCZOS)
+        return bg
+    except Exception:
+        return None
+
+
+def _render_background_element(bg_el, part, slide_w: int, slide_h: int, scheme_colors: dict) -> Image.Image | None:
+    """
+    Parse a <p:bg> element and return a fully-sized background image, or None.
+    Handles solid fills, image (blip) fills, and gradient fills.
+    """
+    bgPr = bg_el.find(qn("p:bgPr"))
+    if bgPr is None:
+        return None
+
+    # --- Image fill (blipFill) ---
+    blipFill = bgPr.find(qn("a:blipFill"))
+    if blipFill is not None:
+        blip = blipFill.find(qn("a:blip"))
+        if blip is not None:
+            rel_id = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+            if rel_id:
+                return _bg_image_from_part(part, rel_id, slide_w, slide_h)
+
+    # --- Solid fill ---
+    solidFill = bgPr.find(qn("a:solidFill"))
+    if solidFill is not None:
+        rgb = None
+        srgb = solidFill.find(qn("a:srgbClr"))
+        if srgb is not None:
+            val = srgb.get("val", "")
+            if len(val) == 6:
+                rgb = (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+        scheme = solidFill.find(qn("a:schemeClr"))
+        if scheme is not None and rgb is None:
+            rgb = scheme_colors.get(scheme.get("val", ""))
+        if rgb:
+            img = Image.new("RGB", (slide_w, slide_h), rgb)
+            return img
+
+    # --- Gradient fill (render as simple two-stop linear gradient) ---
+    gradFill = bgPr.find(qn("a:gradFill"))
+    if gradFill is not None:
+        gsLst = gradFill.find(qn("a:gsLst"))
+        stops: list[tuple[int, int, int]] = []
+        if gsLst is not None:
+            for gs in gsLst.findall(qn("a:gs")):
+                srgb = gs.find(qn("a:srgbClr"))
+                scheme = gs.find(qn("a:schemeClr"))
+                rgb = None
+                if srgb is not None:
+                    val = srgb.get("val", "")
+                    if len(val) == 6:
+                        rgb = (int(val[0:2], 16), int(val[2:4], 16), int(val[4:6], 16))
+                if scheme is not None and rgb is None:
+                    rgb = scheme_colors.get(scheme.get("val", ""))
+                if rgb:
+                    stops.append(rgb)
+        if len(stops) >= 2:
+            img = Image.new("RGB", (slide_w, slide_h))
+            arr = img.load()
+            c1, c2 = stops[0], stops[-1]
+            for y in range(slide_h):
+                t = y / slide_h
+                r = round(c1[0] + (c2[0] - c1[0]) * t)
+                g = round(c1[1] + (c2[1] - c1[1]) * t)
+                b = round(c1[2] + (c2[2] - c1[2]) * t)
+                for x in range(slide_w):
+                    arr[x, y] = (r, g, b)
+            return img
+
+    return None
+
+
+def _get_slide_background(slide, slide_w: int, slide_h: int, scheme_colors: dict) -> Image.Image:
+    """
+    Resolve the slide background by checking the slide, then its layout, then the master.
+    Falls back to lt1 (usually white) if no background is found anywhere.
+    """
+    # Check the slide itself
+    bg_el = slide._element.find(qn("p:bg"))
+    if bg_el is not None:
+        result = _render_background_element(bg_el, slide.part, slide_w, slide_h, scheme_colors)
+        if result is not None:
+            return result
+
+    # Check the slide layout
+    try:
+        layout = slide.slide_layout
+        bg_el = layout._element.find(qn("p:bg"))
+        if bg_el is not None:
+            result = _render_background_element(bg_el, layout.part, slide_w, slide_h, scheme_colors)
+            if result is not None:
+                return result
+    except Exception:
+        pass
+
+    # Check the slide master
+    try:
+        master = slide.slide_layout.slide_master
+        bg_el = master._element.find(qn("p:bg"))
+        if bg_el is not None:
+            result = _render_background_element(bg_el, master.part, slide_w, slide_h, scheme_colors)
+            if result is not None:
+                return result
+    except Exception:
+        pass
+
+    # Final fallback: lt1 (theme light color, typically white)
+    bg_color = scheme_colors.get("lt1", (255, 255, 255))
+    return Image.new("RGB", (slide_w, slide_h), bg_color)
+
+
 def _render_slide(slide, slide_w: int, slide_h: int, scheme_colors: dict) -> Image.Image:
     """Render a single slide to a PIL Image."""
-    # bg1 = lt1 = white in the theme, which is the slide canvas colour
-    bg_color = scheme_colors.get("lt1", (255, 255, 255))
-    img = Image.new("RGB", (slide_w, slide_h), bg_color)
+    img = _get_slide_background(slide, slide_w, slide_h, scheme_colors)
     draw = ImageDraw.Draw(img)
     _render_shapes(slide.shapes, img, draw, scheme_colors)
     return img
@@ -438,23 +555,52 @@ def extract_all_shapes(pptx_path: Path) -> list[dict]:
     return result
 
 
-def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
+def _render_via_spire(pptx_path: Path, target_dir: Path) -> None:
+    """Render slides using Spire.Presentation (pure Python, high quality).
+    Uses a short temp path to avoid Spire issues with spaces in directory names.
     """
-    Render all slides of a PPTX to PNG files in target_dir.
-    Unlike render_slides(), writes to an explicit directory — used for template previews
-    so they don't collide with the report-id namespace.
-    """
-    target_dir.mkdir(parents=True, exist_ok=True)
+    import tempfile, shutil
+    from spire.presentation import Presentation as SpirePresentation  # type: ignore[import]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        prs = SpirePresentation()
+        prs.LoadFromFile(str(pptx_path))
+        count = len(prs.Slides)
+        try:
+            for i in range(count):
+                img = prs.Slides[i].SaveAsImage()
+                img.Save(str(Path(tmpdir) / f"slide_{i}.png"))
+                img.Dispose()
+        finally:
+            prs.Dispose()
+        # Move rendered PNGs to the actual target dir
+        for i in range(count):
+            shutil.move(str(Path(tmpdir) / f"slide_{i}.png"), str(target_dir / f"slide_{i}.png"))
+    logger.info("Rendered %d slides (Spire) to %s", count, target_dir)
+
+
+def _render_slides_pillow(pptx_path: Path, target_dir: Path) -> None:
     prs = Presentation(str(pptx_path))
     slide_w = _emu_to_px(prs.slide_width)
     slide_h = _emu_to_px(prs.slide_height)
     scheme_colors = _resolve_scheme_colors(prs)
-
     for i, slide in enumerate(prs.slides):
         img = _render_slide(slide, slide_w, slide_h, scheme_colors)
         img.save(str(target_dir / f"slide_{i}.png"), "PNG")
+    logger.info("Rendered %d slides (Pillow) to %s", len(prs.slides), target_dir)
 
-    logger.info("Rendered %d slides for template to %s", len(prs.slides), target_dir)
+
+def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
+    """
+    Render all slides of a PPTX to PNG files in target_dir.
+    Uses Spire.Presentation for high-quality output, falls back to Pillow.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        _render_via_spire(pptx_path, target_dir)
+    except Exception as exc:
+        logger.warning("Spire rendering failed, falling back to Pillow: %s", exc)
+        _render_slides_pillow(pptx_path, target_dir)
 
 
 def apply_field_edits(pptx_path: Path, edits: dict[str, str], output_path: Path) -> None:

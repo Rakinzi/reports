@@ -14,6 +14,7 @@
 		fetchTemplate,
 		fetchTemplateShapes,
 		saveTemplateConfig,
+		rerenderTemplatePreviews,
 		type TemplateConfig,
 		type TemplateShape,
 		type SlideShapes,
@@ -29,6 +30,7 @@
 	let loading = $state(true);
 	let saving = $state(false);
 	let saved = $state(false);
+	let rerendering = $state(false);
 	let pageError = $state('');
 	let saveError = $state('');
 	let template = $state<TemplateConfig | null>(null);
@@ -125,6 +127,20 @@
 		} catch { /**/ }
 	}
 
+	async function handleRerender() {
+		rerendering = true;
+		try {
+			await rerenderTemplatePreviews(apiBaseUrl, templateId);
+			// Reset preview_dir locally so the poll loop restarts
+			if (template) template = { ...template, preview_dir: null };
+			if (pollTimer === null) {
+				pollTimer = setInterval(refreshPreviews, 3000);
+			}
+		} catch { /**/ } finally {
+			rerendering = false;
+		}
+	}
+
 	onMount(bootstrap);
 	onDestroy(() => { if (pollTimer) clearInterval(pollTimer); });
 
@@ -192,6 +208,14 @@
 					<Check class="h-4 w-4" /> Saved
 				</span>
 			{/if}
+			<Button variant="outline" size="sm" onclick={() => void handleRerender()} disabled={rerendering}>
+				{#if rerendering}
+					<Loader2 class="mr-2 h-3.5 w-3.5 animate-spin" />
+					Re-rendering…
+				{:else}
+					↺ Re-render Slides
+				{/if}
+			</Button>
 			<Button onclick={handleSave} disabled={saving}>
 				{#if saving}
 					<Loader2 class="mr-2 h-4 w-4 animate-spin" />
@@ -222,33 +246,40 @@
 				</p>
 				{#each slides as slide (slide.slide_index)}
 					{@const imgUrl = slideImageUrl(slide)}
-					<button
-						class="relative w-full overflow-hidden rounded-md border-2 transition-colors {selectedSlide === slide.slide_index
-							? 'border-primary'
-							: 'border-transparent hover:border-muted-foreground/30'}"
+					<!-- svelte-ignore a11y_click_events_have_key_events -->
+					<div
+						role="option"
+						tabindex="0"
+						aria-selected={selectedSlide === slide.slide_index}
+						style:height="108px"
+						style:min-height="108px"
+						style:width="100%"
+						style:position="relative"
+						style:overflow="hidden"
+						style:cursor="pointer"
+						style:border-radius="6px"
+						style:border={selectedSlide === slide.slide_index ? '2px solid hsl(var(--primary))' : '2px solid transparent'}
 						onclick={() => { selectedSlide = slide.slide_index; }}
 					>
-						<div class="relative w-full" style="aspect-ratio: 16/9;">
-							{#if imgUrl}
-								<img
-									src={imgUrl}
-									alt="Slide {slide.slide_index + 1}"
-									class="absolute inset-0 h-full w-full object-cover"
-								/>
-							{:else}
-								<div class="absolute inset-0 flex items-center justify-center bg-muted">
-									{#if template && !template.preview_dir}
-										<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-									{:else}
-										<span class="text-xs text-muted-foreground">{slide.slide_index + 1}</span>
-									{/if}
-								</div>
-							{/if}
-							<span class="absolute bottom-0 left-0 right-0 bg-black/60 px-1 py-0.5 text-center text-[10px] leading-tight text-white">
-								{slide.slide_index + 1}{#if slide.shapes.length > 0}<span class="ml-1 opacity-60">·{slide.shapes.length}</span>{/if}
-							</span>
-						</div>
-					</button>
+						{#if imgUrl}
+							<img
+								src={imgUrl}
+								alt="Slide {slide.slide_index + 1}"
+								style="width: 100%; height: 100%; object-fit: cover; display: block;"
+							/>
+						{:else}
+							<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: hsl(var(--muted));">
+								{#if template && !template.preview_dir}
+									<Loader2 class="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+								{:else}
+									<span style="font-size: 12px; color: hsl(var(--muted-foreground));">{slide.slide_index + 1}</span>
+								{/if}
+							</div>
+						{/if}
+						<span style="position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,0.6); padding: 2px 4px; text-align: center; font-size: 10px; color: white; line-height: 1.4;">
+							{slide.slide_index + 1}{#if slide.shapes.length > 0} · {slide.shapes.length}{/if}
+						</span>
+					</div>
 				{/each}
 			</div>
 

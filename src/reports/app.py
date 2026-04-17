@@ -583,6 +583,27 @@ def put_template_config(template_id: int, body: dict):
     return JSONResponse(_serialize_template(updated))
 
 
+@app.post("/templates/{template_id}/rerender-previews", status_code=202)
+def rerender_template_previews(template_id: int):
+    """Clear the cached preview images and re-render them in the background."""
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    pptx_path = Path(template["pptx_path"])
+    if not pptx_path.exists():
+        raise HTTPException(status_code=404, detail="Template PPTX file not found")
+    # Clear preview_dir so the polling loop knows to wait for new renders
+    update_template_preview_dir(template_id, "")
+    slug = template["slug"]
+    preview_dir = get_user_templates_dir() / f"{slug}-previews"
+    # Wipe the old PNGs
+    if preview_dir.exists():
+        import shutil as _shutil
+        _shutil.rmtree(str(preview_dir), ignore_errors=True)
+    _executor.submit(_render_template_previews_bg, template_id, pptx_path, preview_dir)
+    return JSONResponse({"queued": True})
+
+
 @app.delete("/templates/{template_id}")
 def delete_template_by_id(template_id: int):
     template = get_template(template_id)
