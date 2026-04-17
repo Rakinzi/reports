@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 
@@ -435,16 +435,6 @@ def _serialize_template(template: dict) -> dict:
     }
 
 
-def _render_template_previews_bg(template_id: int, pptx_path: Path, preview_dir: Path) -> None:
-    """Background task: render slide PNGs then update preview_dir in DB."""
-    try:
-        from .slides import render_slides_to_dir
-        render_slides_to_dir(pptx_path, preview_dir)
-        update_template_preview_dir(template_id, str(preview_dir))
-        logger.info("Template preview rendered for template_id=%s at %s", template_id, preview_dir)
-    except Exception as exc:
-        logger.warning("Template preview render failed for template_id=%s: %s", template_id, exc)
-
 
 @app.post("/templates/upload", status_code=201)
 async def upload_template(
@@ -486,9 +476,8 @@ async def upload_template(
     template_id = create_template(label, slug, str(pptx_path), slide_count)
     upsert_template_shapes(template_id, shapes)
 
-    # --- Render previews in background ---
-    preview_dir = templates_dir / f"{slug}-previews"
-    _executor.submit(_render_template_previews_bg, template_id, pptx_path, preview_dir)
+    # Previews are rendered client-side by the frontend (canvas → POST /slides/{i}/image).
+    # No background Python render is started here.
 
     return JSONResponse({"id": template_id, "slug": slug, "slide_count": slide_count}, status_code=201)
 
@@ -565,6 +554,42 @@ def get_template_slide_image(template_id: int, slide_index: int):
     return FileResponse(str(image_path), media_type="image/png")
 
 
+@app.post("/templates/{template_id}/slides/{slide_index}/image", status_code=200)
+async def upload_template_slide_image(template_id: int, slide_index: int, request: Request):
+    """Accept a PNG rendered by the frontend and cache it as a preview."""
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    slug = template["slug"]
+    preview_dir = get_user_templates_dir() / f"{slug}-previews"
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+    (preview_dir / f"slide_{slide_index}.png").write_bytes(body)
+    # Once all slides are present, set preview_dir in DB so polling loop sees them
+    slide_count: int = template["slide_count"] or 0
+    rendered = len(list(preview_dir.glob("slide_*.png")))
+    if rendered >= slide_count:
+        update_template_preview_dir(template_id, str(preview_dir))
+    return JSONResponse({"ok": True, "rendered": rendered, "total": slide_count})
+
+
+@app.get("/templates/{template_id}/pptx-file")
+def get_template_pptx_file(template_id: int):
+    """Serve the raw PPTX binary so the frontend can render thumbnails client-side."""
+    template = get_template(template_id)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    pptx_path = Path(template["pptx_path"])
+    if not pptx_path.exists():
+        raise HTTPException(status_code=404, detail="PPTX file not found")
+    return FileResponse(
+        str(pptx_path),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+
 @app.put("/templates/{template_id}/config")
 def put_template_config(template_id: int, body: dict):
     template = get_template(template_id)
@@ -592,15 +617,13 @@ def rerender_template_previews(template_id: int):
     pptx_path = Path(template["pptx_path"])
     if not pptx_path.exists():
         raise HTTPException(status_code=404, detail="Template PPTX file not found")
-    # Clear preview_dir so the polling loop knows to wait for new renders
+    # Clear preview_dir in DB — frontend will re-render slides client-side via pptxviewjs
     update_template_preview_dir(template_id, "")
     slug = template["slug"]
     preview_dir = get_user_templates_dir() / f"{slug}-previews"
-    # Wipe the old PNGs
     if preview_dir.exists():
         import shutil as _shutil
         _shutil.rmtree(str(preview_dir), ignore_errors=True)
-    _executor.submit(_render_template_previews_bg, template_id, pptx_path, preview_dir)
     return JSONResponse({"queued": True})
 
 

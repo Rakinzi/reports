@@ -907,6 +907,62 @@ def capture_screenshots_and_metrics(
             except Exception:
                 pass
 
+            # --- Platform devices table screenshot (snapshot → Tech → Overview → View platform devices) ---
+            try:
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("ga-secondary-nav-item button", has_text="Reports snapshot").click()
+                page.wait_for_timeout(3000)
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("ga-secondary-nav-item button").filter(has_text="Tech").click()
+                page.wait_for_timeout(1500)
+                page.locator("ga-secondary-nav-item button").filter(has_text="Overview").last.click()
+                page.wait_for_timeout(3000)
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("span.view-link-text", has_text="View platform devices").click()
+                page.wait_for_timeout(4000)
+                _ensure_expected_ga4_property(page, report_name)
+                row_num_col = page.locator("th.cdk-column-__row_index__").first
+                row_num_col.wait_for(state="visible", timeout=10000)
+                page.keyboard.press("End")
+                page.wait_for_timeout(1000)
+                page.mouse.wheel(0, 3000)
+                page.wait_for_timeout(1000)
+                table_box = page.locator("table.adv-table").bounding_box()
+                if table_box:
+                    path = out_dir / "platform_devices_table.png"
+                    page.screenshot(path=str(path), clip=table_box, full_page=True)
+                    screenshots["platform_devices_table"] = path
+            except Exception:
+                pass
+
+            # --- Browsers table screenshot (snapshot → Tech → Overview → View browsers) ---
+            try:
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("ga-secondary-nav-item button", has_text="Reports snapshot").click()
+                page.wait_for_timeout(3000)
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("ga-secondary-nav-item button").filter(has_text="Tech").click()
+                page.wait_for_timeout(1500)
+                page.locator("ga-secondary-nav-item button").filter(has_text="Overview").last.click()
+                page.wait_for_timeout(3000)
+                _ensure_expected_ga4_property(page, report_name)
+                page.locator("span.view-link-text", has_text="View browsers").click()
+                page.wait_for_timeout(4000)
+                _ensure_expected_ga4_property(page, report_name)
+                row_num_col = page.locator("th.cdk-column-__row_index__").first
+                row_num_col.wait_for(state="visible", timeout=10000)
+                page.keyboard.press("End")
+                page.wait_for_timeout(1000)
+                page.mouse.wheel(0, 3000)
+                page.wait_for_timeout(1000)
+                table_box = page.locator("table.adv-table").bounding_box()
+                if table_box:
+                    path = out_dir / "browsers_table.png"
+                    page.screenshot(path=str(path), clip=table_box, full_page=True)
+                    screenshots["browsers_table"] = path
+            except Exception:
+                pass
+
             # --- Screenshots for remaining GA4 sections ---
             for label, fragment in GA4_SECTIONS:
                 page = _goto_ga4_section(page, report_name, fragment)

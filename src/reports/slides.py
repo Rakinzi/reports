@@ -555,31 +555,13 @@ def extract_all_shapes(pptx_path: Path) -> list[dict]:
     return result
 
 
-def _render_via_spire(pptx_path: Path, target_dir: Path) -> None:
-    """Render slides using Spire.Presentation (pure Python, high quality).
-    Uses a short temp path to avoid Spire issues with spaces in directory names.
+def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
     """
-    import tempfile, shutil
-    from spire.presentation import Presentation as SpirePresentation  # type: ignore[import]
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        prs = SpirePresentation()
-        prs.LoadFromFile(str(pptx_path))
-        count = len(prs.Slides)
-        try:
-            for i in range(count):
-                img = prs.Slides[i].SaveAsImage()
-                img.Save(str(Path(tmpdir) / f"slide_{i}.png"))
-                img.Dispose()
-        finally:
-            prs.Dispose()
-        # Move rendered PNGs to the actual target dir
-        for i in range(count):
-            shutil.move(str(Path(tmpdir) / f"slide_{i}.png"), str(target_dir / f"slide_{i}.png"))
-    logger.info("Rendered %d slides (Spire) to %s", count, target_dir)
-
-
-def _render_slides_pillow(pptx_path: Path, target_dir: Path) -> None:
+    Render all slides of a PPTX to PNG files in target_dir using Pillow.
+    This is a server-side fallback — the frontend renders thumbnails client-side
+    via pptxviewjs for better quality and no slide-count limits.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
     prs = Presentation(str(pptx_path))
     slide_w = _emu_to_px(prs.slide_width)
     slide_h = _emu_to_px(prs.slide_height)
@@ -588,19 +570,6 @@ def _render_slides_pillow(pptx_path: Path, target_dir: Path) -> None:
         img = _render_slide(slide, slide_w, slide_h, scheme_colors)
         img.save(str(target_dir / f"slide_{i}.png"), "PNG")
     logger.info("Rendered %d slides (Pillow) to %s", len(prs.slides), target_dir)
-
-
-def render_slides_to_dir(pptx_path: Path, target_dir: Path) -> None:
-    """
-    Render all slides of a PPTX to PNG files in target_dir.
-    Uses Spire.Presentation for high-quality output, falls back to Pillow.
-    """
-    target_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        _render_via_spire(pptx_path, target_dir)
-    except Exception as exc:
-        logger.warning("Spire rendering failed, falling back to Pillow: %s", exc)
-        _render_slides_pillow(pptx_path, target_dir)
 
 
 def apply_field_edits(pptx_path: Path, edits: dict[str, str], output_path: Path) -> None:

@@ -1068,15 +1068,6 @@ wheels = [
 ]
 
 [[package]]
-name = "plum-dispatch"
-version = "1.7.4"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/39/4e/f4d6b2bd80a9880989d37773f0f2e3a91a2d5352732e4ebb68b5606bca83/plum-dispatch-1.7.4.tar.gz", hash = "sha256:1c1d15b2842b5fa98405fd3dff6fad4887bdc77b60bd200e209d76ebfe9990fe", size = 56429, upload-time = "2022-10-21T06:29:20.747Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/b6/3aaa985591c63da64c7bd8c5f470442a4c00b37ad3ed057f21de14174f83/plum_dispatch-1.7.4-py3-none-any.whl", hash = "sha256:c40dbeab269bbbf972ce0dbc078380da19ebaee1a370a2c564e1814a11bde216", size = 24238, upload-time = "2022-10-21T06:29:19.054Z" },
-]
-
-[[package]]
 name = "primp"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1453,7 +1444,6 @@ dependencies = [
     { name = "python-pptx" },
     { name = "pyzbar" },
     { name = "qrcode" },
-    { name = "spire-presentation" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -1477,7 +1467,6 @@ requires-dist = [
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "pyzbar", specifier = ">=0.1.9" },
     { name = "qrcode", specifier = ">=8.2" },
-    { name = "spire-presentation", specifier = ">=11.3.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.41.0" },
 ]
 
@@ -1542,21 +1531,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/7b/ae/2d9c981590ed9999a0d91755b47fc74f74de286b0f5cee14c9269041e6c4/soupsieve-2.8.3.tar.gz", hash = "sha256:3267f1eeea4251fb42728b6dfb746edc9acaffc4a45b27e19450b676586e8349", size = 118627, upload-time = "2026-01-20T04:27:02.457Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/46/2c/1462b1d0a634697ae9e55b3cecdcb64788e8b7d63f54d923fcd0bb140aed/soupsieve-2.8.3-py3-none-any.whl", hash = "sha256:ed64f2ba4eebeab06cc4962affce381647455978ffc1e36bb79a545b91f45a95", size = 37016, upload-time = "2026-01-20T04:27:01.012Z" },
-]
-
-[[package]]
-name = "spire-presentation"
-version = "11.3.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "plum-dispatch" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/5b/0611d6bd0e869f2816a7bb3a32dd1ea1413b5490e98d321199ace80d6a56/spire_presentation-11.3.0-py3-none-macosx_10_7_universal.whl", hash = "sha256:eaaa4e85fc682f39618f7fb00c0f9644991b9defe1cf805edd71bc2332e8458b", size = 49602515, upload-time = "2026-03-23T06:41:09.243Z" },
-    { url = "https://files.pythonhosted.org/packages/17/2b/951041cada4ee669ef4a05b4359dffbfe47cc15b68e3cc8c497b4375c655/spire_presentation-11.3.0-py3-none-macosx_11_0_arm64.whl", hash = "sha256:600b8977c02681173e72dabe32fd74faf9bbe1071c544f9412512b5462d5703e", size = 27598104, upload-time = "2026-03-23T06:41:16.846Z" },
-    { url = "https://files.pythonhosted.org/packages/be/71/6a29096747e2c2037129cd6ce2487d3b98ae3dddfb137cabc9831794f169/spire_presentation-11.3.0-py3-none-manylinux2014_aarch64.whl", hash = "sha256:c6fc1117400eb3c8fc74801f916abf607030a994df0363f40b44f70bf48f388d", size = 23837053, upload-time = "2026-03-23T06:41:24.635Z" },
-    { url = "https://files.pythonhosted.org/packages/fd/46/8ca811edf5ea0b4ab0806753e38d81863598a1850cedd9ef1b97507de9f4/spire_presentation-11.3.0-py3-none-manylinux_2_31_x86_64.whl", hash = "sha256:80dc450767ba1232291088e7b668fa9909ed68a0bce6b35b4d694d3f31bde16f", size = 25143312, upload-time = "2026-03-23T06:41:32.101Z" },
-    { url = "https://files.pythonhosted.org/packages/64/18/6aebacda3ae052607d0f3f8d0a43758838aa17e7401602ab3508453d715b/spire_presentation-11.3.0-py3-none-win_amd64.whl", hash = "sha256:2c192d1762257fb8b71189e4364a11d60b48929836a11c53fc18ae2b06d1ff84", size = 25539212, upload-time = "2026-03-23T06:41:39.093Z" },
 ]
 
 [[package]]

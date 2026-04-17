@@ -15,6 +15,8 @@
 		fetchTemplateShapes,
 		saveTemplateConfig,
 		rerenderTemplatePreviews,
+		fetchTemplatePptxBlob,
+		uploadSlideImage,
 		type TemplateConfig,
 		type TemplateShape,
 		type SlideShapes,
@@ -48,6 +50,8 @@
 
 	// Poll until preview thumbnails are rendered
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	// Guard against concurrent render calls
+	let rendering = false;
 
 	let currentSlide = $derived(slides.find((s) => s.slide_index === selectedSlide));
 
@@ -107,9 +111,12 @@
 		}
 		mappings = existingMap;
 
-		// If no previews yet, start polling
-		if (!template.preview_dir && pollTimer === null) {
-			pollTimer = setInterval(refreshPreviews, 3000);
+		// If no previews yet and not already rendering, kick off client-side render
+		if (!template.preview_dir && !rendering) {
+			void renderSlidesClientSide().catch((err) => {
+				console.error('Client-side render failed:', err);
+				pageError = err instanceof Error ? err.message : 'Slide render failed.';
+			});
 		}
 	}
 
@@ -130,14 +137,55 @@
 	async function handleRerender() {
 		rerendering = true;
 		try {
-			await rerenderTemplatePreviews(apiBaseUrl, templateId);
-			// Reset preview_dir locally so the poll loop restarts
-			if (template) template = { ...template, preview_dir: null };
-			if (pollTimer === null) {
-				pollTimer = setInterval(refreshPreviews, 3000);
-			}
+			await renderSlidesClientSide();
 		} catch { /**/ } finally {
 			rerendering = false;
+		}
+	}
+
+	async function renderSlidesClientSide() {
+		if (rendering) return;
+		rendering = true;
+		try {
+			// 1. Fetch the PPTX binary
+			const pptxBuffer = await fetchTemplatePptxBlob(apiBaseUrl, templateId);
+
+			// 2. Lazily import pptxviewjs
+			const { PPTXViewer } = await import('pptxviewjs');
+
+			const canvas = document.createElement('canvas');
+			canvas.width = 1280;
+			canvas.height = 720;
+
+			const viewer = new PPTXViewer({ canvas, slideSizeMode: 'fit' });
+			await viewer.loadFile(pptxBuffer);
+			const count = viewer.getSlideCount();
+			console.log(`[pptxviewjs] loaded ${count} slides`);
+
+			// 3. Render each slide → upload PNG to backend
+			for (let i = 0; i < count; i++) {
+				await viewer.renderSlide(i, canvas);
+				const blob = await new Promise<Blob>((resolve, reject) => {
+					canvas.toBlob((b) => {
+						if (b) resolve(b);
+						else reject(new Error('toBlob returned null'));
+					}, 'image/png');
+				});
+				await uploadSlideImage(apiBaseUrl, templateId, i, blob);
+				console.log(`[pptxviewjs] uploaded slide ${i + 1}/${count}`);
+			}
+
+			viewer.destroy();
+
+			// 4. Refresh slides from backend — preview_dir is now set after last upload
+			const [freshTemplate, freshSlides] = await Promise.all([
+				fetchTemplate(apiBaseUrl, templateId),
+				fetchTemplateShapes(apiBaseUrl, templateId)
+			]);
+			template = freshTemplate;
+			slides = freshSlides;
+		} finally {
+			rendering = false;
 		}
 	}
 

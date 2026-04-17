@@ -27,7 +27,10 @@
 		"@tauri-apps/api": "^2.0.0",
 		"@tauri-apps/plugin-dialog": "^2.0.0",
 		"@tauri-apps/plugin-opener": "^2.5.3",
-		"animejs": "^4.3.6"
+		"animejs": "^4.3.6",
+		"chart.js": "^4.5.1",
+		"jszip": "^3.10.1",
+		"pptxviewjs": "^1.1.9"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.0.2",
@@ -42,6 +45,7 @@
 		"@tailwindcss/typography": "^0.5.19",
 		"@tailwindcss/vite": "^4.1.18",
 		"@tauri-apps/cli": "^2.0.0",
+		"@types/jszip": "^3.4.1",
 		"@types/node": "^20",
 		"@vitest/browser-playwright": "^4.0.18",
 		"bits-ui": "^2.16.3",

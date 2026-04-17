@@ -283,3 +283,22 @@ export function searchGa4Properties(apiBaseUrl: string, query: string): Promise<
 		body: JSON.stringify({ query }),
 	});
 }
+
+export async function fetchTemplatePptxBlob(apiBaseUrl: string, id: number): Promise<ArrayBuffer> {
+	const res = await fetch(`${apiBaseUrl}/templates/${id}/pptx-file`);
+	if (!res.ok) throw new Error(`Failed to fetch PPTX: ${res.status}`);
+	return res.arrayBuffer();
+}
+
+export async function uploadSlideImage(
+	apiBaseUrl: string,
+	id: number,
+	slideIndex: number,
+	pngBlob: Blob
+): Promise<void> {
+	await fetch(`${apiBaseUrl}/templates/${id}/slides/${slideIndex}/image`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/octet-stream' },
+		body: pngBlob,
+	});
+}
