@@ -101,7 +101,7 @@ def create_report(report_name: str, date_range: str, report_date: str) -> int:
 def update_report_completed(report_id: int, output_path: str) -> None:
     with _connect() as conn:
         conn.execute(
-            "UPDATE reports SET status='completed', output_path=? WHERE id=?",
+            "UPDATE reports SET status='completed', output_path=?, error=NULL, stage='Completed' WHERE id=?",
             (output_path, report_id),
         )
         conn.commit()

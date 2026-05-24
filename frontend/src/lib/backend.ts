@@ -124,6 +124,26 @@ export async function fetchSlides(apiBaseUrl: string, reportId: number): Promise
 	return fetchJson<Slide[]>(apiBaseUrl, `/reports/${reportId}/slides`);
 }
 
+export async function fetchReportPptxBlob(apiBaseUrl: string, reportId: number): Promise<ArrayBuffer> {
+	const res = await fetch(`${apiBaseUrl}/reports/${reportId}/pptx-file`);
+	if (!res.ok) throw new Error(`Failed to fetch report PPTX: ${res.status}`);
+	return res.arrayBuffer();
+}
+
+export async function uploadReportSlideImage(
+	apiBaseUrl: string,
+	reportId: number,
+	slideIndex: number,
+	pngBlob: Blob
+): Promise<void> {
+	const res = await fetch(`${apiBaseUrl}/reports/${reportId}/slides/${slideIndex}/image`, {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/octet-stream' },
+		body: pngBlob,
+	});
+	if (!res.ok) throw new Error(`Failed to upload report slide image: ${res.status}`);
+}
+
 export async function rewriteField(
 	apiBaseUrl: string,
 	reportId: number,

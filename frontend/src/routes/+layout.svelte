@@ -3,12 +3,28 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { onNavigate } from '$app/navigation';
-	import { FileText, LayoutDashboard, ChevronRight, Settings, ScrollText, Sun, Moon, Layers } from '@lucide/svelte';
+	import { FileText, LayoutDashboard, ChevronRight, Settings, ScrollText, Sun, Moon, Layers, RefreshCw } from '@lucide/svelte';
 	import { theme } from '$lib/theme.svelte';
+	import { resolveBackendContext, waitForBackend } from '$lib/backend';
+	import { restartBackendProcess } from '$lib/desktop';
 
 	let { children } = $props();
+	let isTauri = $state(false);
+	let restartingBackend = $state(false);
+	let backendActionMessage = $state('');
+	let backendActionError = $state('');
 
-	onMount(() => theme.init());
+	onMount(() => {
+		theme.init();
+		void (async () => {
+			try {
+				const desktop = await resolveBackendContext();
+				isTauri = desktop.isTauri;
+			} catch {
+				isTauri = false;
+			}
+		})();
+	});
 
 	// Smooth page transitions via the native View Transitions API (Chromium/Tauri = full support)
 	onNavigate((navigation) => {
@@ -20,6 +36,23 @@
 			});
 		});
 	});
+
+	async function restartBackend() {
+		restartingBackend = true;
+		backendActionMessage = '';
+		backendActionError = '';
+		try {
+			const desktop = await resolveBackendContext();
+			await restartBackendProcess();
+			await waitForBackend(desktop.apiBaseUrl, { attempts: 120, intervalMs: 500 });
+			backendActionMessage = 'Backend restarted. Reloading...';
+			window.location.reload();
+		} catch (error) {
+			backendActionError = error instanceof Error ? error.message : 'Could not restart the backend.';
+		} finally {
+			restartingBackend = false;
+		}
+	}
 </script>
 
 <div class="flex h-screen overflow-hidden bg-background text-foreground">
@@ -90,7 +123,18 @@
 		</nav>
 
 		<!-- Theme toggle in sidebar footer -->
-		<div class="border-t border-border p-4">
+		<div class="space-y-2 border-t border-border p-4">
+			{#if isTauri}
+				<button
+					onclick={() => void restartBackend()}
+					disabled={restartingBackend}
+					class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
+					title="Restart the bundled backend"
+				>
+					<RefreshCw class={`h-4 w-4 ${restartingBackend ? 'animate-spin' : ''}`} />
+					{restartingBackend ? 'Restarting backend...' : 'Restart Backend'}
+				</button>
+			{/if}
 			<button
 				onclick={() => theme.toggle()}
 				class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
@@ -104,6 +148,12 @@
 					Dark mode
 				{/if}
 			</button>
+			{#if backendActionMessage}
+				<p class="px-3 text-xs text-emerald-600 dark:text-emerald-300">{backendActionMessage}</p>
+			{/if}
+			{#if backendActionError}
+				<p class="px-3 text-xs text-red-600 dark:text-red-300">{backendActionError}</p>
+			{/if}
 		</div>
 	</aside>
 

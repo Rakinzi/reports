@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import threading
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -29,11 +30,99 @@ from .schemas import AppSettingsUpdate, GenerateReportRequest, HARDCODED_REPORT_
 _executor = ThreadPoolExecutor(max_workers=1)
 logger = configure_logging()
 
+REPORT_LABELS = {
+    "bancabc": "BancABC",
+}
+
 # Maps report_id -> Event; set the event to request cancellation.
 _cancel_flags: dict[int, threading.Event] = {}
 
 
-def _run_generate(report_id: int, report_name: str, date_range: str, report_date: str, start_date: str, end_date: str):
+def _write_logo_override(report_id: int, data_url: str, filename: str) -> Path | None:
+    if not data_url:
+        return None
+    match = re.match(r"^data:image/[^;]+;base64,(.+)$", data_url)
+    if not match:
+        raise ValueError("Slide 1 logo must be an image file.")
+
+    suffix = Path(filename).suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff"}:
+        suffix = ".png"
+
+    raw = base64.b64decode(match.group(1), validate=True)
+    logo_dir = get_app_data_dir() / "logo-overrides"
+    logo_dir.mkdir(parents=True, exist_ok=True)
+    logo_path = logo_dir / f"report-{report_id}{suffix}"
+    logo_path.write_bytes(raw)
+    return logo_path
+
+
+def _apply_slide1_overrides(
+    output_path: Path,
+    report_name: str,
+    slide1_source_name: str,
+    slide1_name: str,
+    logo_path: Path | None,
+) -> None:
+    slide1_name = (slide1_name or "").strip()
+    if not slide1_name and logo_path is None:
+        return
+
+    from pptx import Presentation
+    from .generator import _fill_text_run, _replace_image_in_slide
+
+    prs = Presentation(str(output_path))
+    if not prs.slides:
+        return
+
+    slide = prs.slides[0]
+    if slide1_name:
+        source_names = {
+            report_name,
+            slide1_source_name,
+            report_name.replace("_", " "),
+            report_name.replace("_", " ").title(),
+            report_name.replace("_", " ").upper(),
+        }
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            for para in shape.text_frame.paragraphs:
+                text = "".join(run.text for run in para.runs) or para.text
+                updated = text
+                for source in source_names:
+                    if source:
+                        updated = re.sub(re.escape(source), slide1_name, updated, flags=re.IGNORECASE)
+                if updated != text:
+                    _fill_text_run(para, updated)
+
+    preserve_logo = report_name == "dicomm" or slide1_source_name.strip().lower() == "dicomm mccann"
+    if logo_path is not None and logo_path.exists() and not preserve_logo:
+        pictures = [
+            shape for shape in slide.shapes
+            if getattr(shape, "shape_type", None) == 13 and getattr(shape, "left", 0) < 3_000_000
+        ]
+        if not pictures:
+            pictures = [shape for shape in slide.shapes if getattr(shape, "shape_type", None) == 13]
+        if pictures:
+            target = sorted(pictures, key=lambda s: (int(getattr(s, "top", 0)), int(getattr(s, "left", 0))))[0]
+            _replace_image_in_slide(slide, logo_path, shape_name=target.name)
+
+    prs.save(str(output_path))
+
+
+def _run_generate(
+    report_id: int,
+    report_name: str,
+    date_range: str,
+    report_date: str,
+    start_date: str,
+    end_date: str,
+    slide1_source_name: str = "",
+    slide1_name: str = "",
+    slide1_logo_data_url: str = "",
+    slide1_logo_filename: str = "",
+):
     cancel_flag = _cancel_flags.get(report_id)
 
     def stage_callback(stage: str) -> None:
@@ -63,20 +152,21 @@ def _run_generate(report_id: int, report_name: str, date_range: str, report_date
             end_date=end_date,
             _stage_callback=stage_callback,
         )
+        if report_name == "bancabc":
+            slide1_source_name = "Delta"
+            if not slide1_name.strip():
+                slide1_name = "BancABC"
+        logo_path = _write_logo_override(report_id, slide1_logo_data_url, slide1_logo_filename)
+        if slide1_name.strip() or logo_path is not None:
+            update_report_stage(report_id, "Applying slide 1 branding...")
+            _apply_slide1_overrides(Path(output_path), report_name, slide1_source_name, slide1_name, logo_path)
         update_report_stage(report_id, "Finalising report...")
         update_report_completed(report_id, str(output_path))
         logger.info("Completed report generation for report_id=%s output_path=%s", report_id, output_path)
 
-        # Render PDF preview
-        try:
-            from .slides import render_pdf
-            from pathlib import Path as _Path
-            update_report_stage(report_id, "Rendering slide previews...")
-            pdf_path = render_pdf(report_id, _Path(output_path))
-            update_report_slides_dir(report_id, str(pdf_path.parent))
-            logger.info("Rendered PDF preview for report_id=%s pdf=%s", report_id, pdf_path)
-        except Exception as render_err:
-            logger.warning("PDF preview rendering failed for report_id=%s: %s", report_id, render_err)
+        # Slide previews are rendered client-side by the frontend with pptxviewjs.
+        # The browser uploads PNGs back to /reports/{id}/slides/{i}/image.
+        update_report_slides_dir(report_id, "")
     except InterruptedError as e:
         update_report_failed(report_id, str(e))
         logger.info("Report generation cancelled for report_id=%s", report_id)
@@ -199,6 +289,10 @@ def post_generate_report(body: GenerateReportRequest):
         body.report_date,
         body.start_date,
         body.end_date,
+        body.slide1_source_name,
+        body.slide1_name,
+        body.slide1_logo_data_url,
+        body.slide1_logo_filename,
     )
     return JSONResponse({"id": report_id, "status": "pending"}, status_code=202)
 
@@ -260,6 +354,17 @@ def _resolve_report_path(stored: str) -> Path:
     return Path.cwd() / p
 
 
+def _report_preview_dir(report_id: int) -> Path:
+    return get_app_data_dir() / "report-previews" / f"report-{report_id}"
+
+
+def _clear_report_preview_cache(report_id: int) -> None:
+    preview_dir = _report_preview_dir(report_id)
+    if preview_dir.exists():
+        shutil.rmtree(str(preview_dir), ignore_errors=True)
+    update_report_slides_dir(report_id, "")
+
+
 @app.get("/reports/{report_id}/download")
 def download_report(report_id: int):
     report = get_report(report_id)
@@ -277,33 +382,35 @@ def download_report(report_id: int):
     )
 
 
-@app.get("/reports/{report_id}/preview.pdf")
-def get_report_preview_pdf(report_id: int):
-    from pathlib import Path as _Path
+@app.get("/reports/{report_id}/pptx-file")
+def get_report_pptx_file(report_id: int):
+    """Serve the generated PPTX so the frontend can render previews client-side."""
     report = get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
     if report["status"] != "completed" or not report["output_path"]:
         raise HTTPException(status_code=400, detail="Report is not ready")
-
     output_path = _resolve_report_path(report["output_path"])
     if not output_path.exists():
         raise HTTPException(status_code=404, detail="Report file not found on disk")
+    return FileResponse(
+        str(output_path),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        filename=output_path.name,
+    )
 
-    # Check for a cached preview.pdf
-    slides_dir = report.get("slides_dir")
-    if slides_dir:
-        cached = _Path(slides_dir) / "preview.pdf"
-        if cached.exists():
-            return FileResponse(str(cached), media_type="application/pdf")
 
-    # Generate on demand
-    try:
-        from .slides import render_pdf
-        pdf_path = render_pdf(report_id, output_path)
-        return FileResponse(str(pdf_path), media_type="application/pdf")
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+@app.get("/reports/{report_id}/preview.pdf")
+def get_report_preview_pdf(report_id: int):
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] != "completed" or not report["output_path"]:
+        raise HTTPException(status_code=400, detail="Report is not ready")
+    raise HTTPException(
+        status_code=410,
+        detail="PDF previews are no longer generated. Use browser-rendered slide images.",
+    )
 
 
 @app.get("/reports/{report_id}/slides")
@@ -328,7 +435,9 @@ def get_report_slides(report_id: int):
         idx = slide_data["slide_index"]
         has_image = False
         if slides_dir:
-            has_image = (_Path(slides_dir) / f"slide_{idx}.png").exists()
+            slides_path = _Path(slides_dir)
+            is_browser_preview = slides_path == _report_preview_dir(report_id)
+            has_image = is_browser_preview and (slides_path / f"slide_{idx}.png").exists()
         result.append({
             "slide_index": idx,
             "image_url": f"/reports/{report_id}/slides/{idx}/image" if has_image else None,
@@ -347,6 +456,35 @@ def get_slide_image(report_id: int, slide_index: int):
     if not image_path.exists():
         raise HTTPException(status_code=404, detail=f"Slide {slide_index} image not found")
     return FileResponse(str(image_path), media_type="image/png")
+
+
+@app.post("/reports/{report_id}/slides/{slide_index}/image", status_code=200)
+async def upload_report_slide_image(report_id: int, slide_index: int, request: Request):
+    """Accept a browser-rendered slide PNG and cache it as the report preview."""
+    report = get_report(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if report["status"] != "completed" or not report["output_path"]:
+        raise HTTPException(status_code=400, detail="Report is not ready")
+
+    output_path = _resolve_report_path(report["output_path"])
+    if not output_path.exists():
+        raise HTTPException(status_code=404, detail="Report file not found on disk")
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body")
+
+    preview_dir = _report_preview_dir(report_id)
+    preview_dir.mkdir(parents=True, exist_ok=True)
+    (preview_dir / f"slide_{slide_index}.png").write_bytes(body)
+
+    from pptx import Presentation
+    slide_count = len(Presentation(str(output_path)).slides)
+    rendered = len(list(preview_dir.glob("slide_*.png")))
+    if rendered >= slide_count:
+        update_report_slides_dir(report_id, str(preview_dir))
+    return JSONResponse({"ok": True, "rendered": rendered, "total": slide_count})
 
 
 @app.post("/reports/{report_id}/slides/{slide_index}/rewrite")
@@ -403,13 +541,7 @@ def apply_report_edits(report_id: int, body: dict):
 
     update_report_completed(report_id, str(edited_path))
     update_report_edits(report_id, _json.dumps(edits))
-
-    try:
-        from .slides import render_pdf
-        pdf_path = render_pdf(report_id, edited_path)
-        update_report_slides_dir(report_id, str(pdf_path.parent))
-    except Exception as render_err:
-        logger.warning("PDF re-render failed after edits for report_id=%s: %s", report_id, render_err)
+    _clear_report_preview_cache(report_id)
 
     return JSONResponse({
         "output_path": str(edited_path),
@@ -491,7 +623,7 @@ def get_templates():
 def get_report_options():
     """Return merged built-in + user template list for the report generation dropdown."""
     options = [
-        {"value": name, "label": name.replace("_", " ").title(), "source": "builtin"}
+        {"value": name, "label": REPORT_LABELS.get(name, name.replace("_", " ").title()), "source": "builtin"}
         for name in sorted(HARDCODED_REPORT_NAMES)
     ]
     for t in list_templates():

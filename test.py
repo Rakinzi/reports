@@ -21,6 +21,7 @@ if str(REPO_ROOT) not in sys.path:
 from src.reports.generator import (  # noqa: E402
     _ensure_expected_ga4_property,
     _goto_ga4_section,
+    _leave_ga4_start_page,
     _launch_persistent_context,
     _switch_ga4_property_via_search,
 )
@@ -29,6 +30,7 @@ from src.reports.generator_2026 import (  # noqa: E402
     _build_slide5,
     _label_page_paths_with_gemini,
     _open_snapshot_and_set_dates,
+    _scrape_countries_table,
     _scrape_pages_table,
     _switch_dimension_to_page_path,
 )
@@ -47,9 +49,11 @@ def _capture_slide5_data(
 ) -> tuple[dict[str, Path], list[dict], int]:
     screenshots: dict[str, Path] = {}
     pages_data: list[dict] = []
+    countries_data: list[dict] = []
     site_total_views = 0
 
     dump_json_path = REPO_ROOT / "dump_page_performance_rows.json"
+    dump_countries_json_path = REPO_ROOT / "dump_country_rows.json"
 
     with sync_playwright() as playwright:
         context = _launch_persistent_context(playwright, headless=False)
@@ -72,9 +76,27 @@ def _capture_slide5_data(
             _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
             _ensure_expected_ga4_property(page, report_name)
 
-            print(f"{INFO} Opening Pages and Screens report...")
-            page.get_by_role("button", name="View pages and screens", exact=True).click()
+            print(f"{INFO} Opening Countries report...")
+            page.locator("span.view-link-text", has_text="View countries").click()
             page.wait_for_timeout(4000)
+            page = _leave_ga4_start_page(page, report_name, "/reports/overview")
+            print(f"{INFO} Countries URL: {page.url}")
+            _ensure_expected_ga4_property(page, report_name)
+            page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+            countries_data = _scrape_countries_table(page)
+            dump_countries_json_path.write_text(json.dumps(countries_data, indent=2), encoding="utf-8")
+            print(f"{INFO} Returning to snapshot...")
+            page.go_back()
+            page.wait_for_timeout(3000)
+            page = _leave_ga4_start_page(page, report_name, "/reports/overview")
+            print(f"{INFO} Snapshot URL after back: {page.url}")
+            _ensure_expected_ga4_property(page, report_name)
+
+            print(f"{INFO} Opening Pages and Screens report...")
+            page.locator("span.view-link-text", has_text="View pages and screens").click()
+            page.wait_for_timeout(4000)
+            page = _leave_ga4_start_page(page, report_name, "/reports/overview")
+            print(f"{INFO} Pages URL: {page.url}")
             _ensure_expected_ga4_property(page, report_name)
 
             row_num_col = page.locator("th.cdk-column-__row_index__").first
@@ -116,6 +138,7 @@ def _capture_slide5_data(
                 pass
 
     print(f"{PASS} Wrote parsed rows → {dump_json_path.resolve()}")
+    print(f"{PASS} Wrote countries rows → {dump_countries_json_path.resolve()} ({len(countries_data)} rows)")
     if "pages_table" in screenshots:
         print(f"{PASS} Wrote table screenshot → {screenshots['pages_table'].resolve()}")
 

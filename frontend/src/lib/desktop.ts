@@ -54,3 +54,11 @@ export async function openExternalUrl(url: string) {
 
 	window.open(url, '_blank', 'noopener,noreferrer');
 }
+
+export async function restartBackendProcess() {
+	if (!isTauriApp()) {
+		throw new Error('Backend restart is only available in the desktop app.');
+	}
+
+	await invoke('restart_backend');
+}

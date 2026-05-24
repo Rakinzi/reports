@@ -1,0 +1,82 @@
+[
+  {
+    "country": "Zimbabwe",
+    "users": 6492,
+    "new_users": 5514,
+    "engaged_sessions": 5910,
+    "engagement_rate": "38.16%",
+    "engaged_sessions_per_user": "0.91"
+  },
+  {
+    "country": "United States",
+    "users": 607,
+    "new_users": 585,
+    "engaged_sessions": 157,
+    "engagement_rate": "21.27%",
+    "engaged_sessions_per_user": "0.26"
+  },
+  {
+    "country": "Singapore",
+    "users": 295,
+    "new_users": 291,
+    "engaged_sessions": 23,
+    "engagement_rate": "6.91%",
+    "engaged_sessions_per_user": "0.08"
+  },
+  {
+    "country": "South Africa",
+    "users": 208,
+    "new_users": 166,
+    "engaged_sessions": 169,
+    "engagement_rate": "46.43%",
+    "engaged_sessions_per_user": "0.81"
+  },
+  {
+    "country": "United Kingdom",
+    "users": 195,
+    "new_users": 178,
+    "engaged_sessions": 152,
+    "engagement_rate": "52.6%",
+    "engaged_sessions_per_user": "0.78"
+  },
+  {
+    "country": "China",
+    "users": 117,
+    "new_users": 114,
+    "engaged_sessions": 38,
+    "engagement_rate": "32.48%",
+    "engaged_sessions_per_user": "0.32"
+  },
+  {
+    "country": "Ireland",
+    "users": 114,
+    "new_users": 113,
+    "engaged_sessions": 33,
+    "engagement_rate": "27.27%",
+    "engaged_sessions_per_user": "0.29"
+  },
+  {
+    "country": "Netherlands",
+    "users": 99,
+    "new_users": 91,
+    "engaged_sessions": 65,
+    "engagement_rate": "55.56%",
+    "engaged_sessions_per_user": "0.66"
+  },
+  {
+    "country": "India",
+    "users": 64,
+    "new_users": 63,
+    "engaged_sessions": 43,
+    "engagement_rate": "46.74%",
+    "engaged_sessions_per_user": "0.67"
+  },
+  {
+    "country": "Zambia",
+    "users": 43,
+    "new_users": 40,
+    "engaged_sessions": 19,
+    "engagement_rate": "36.54%",
+    "engaged_sessions_per_user": "0.44"
+  }
+]

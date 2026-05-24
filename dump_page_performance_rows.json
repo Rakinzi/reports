@@ -1,0 +1,102 @@
+[
+  {
+    "title": "Website Homepage",
+    "path": "/",
+    "views": 14128,
+    "views_pct": "61.25%",
+    "active_users": 5765,
+    "active_users_pct": "67.59%",
+    "views_per_user": "2.45",
+    "avg_engagement_time": "26s"
+  },
+  {
+    "title": "Contact Us Page",
+    "path": "/contact-us/",
+    "views": 890,
+    "views_pct": "3.86%",
+    "active_users": 564,
+    "active_users_pct": "6.61%",
+    "views_per_user": "1.58",
+    "avg_engagement_time": "46s"
+  },
+  {
+    "title": "Page Not Found Error",
+    "path": "/404.html",
+    "views": 661,
+    "views_pct": "2.87%",
+    "active_users": 237,
+    "active_users_pct": "2.78%",
+    "views_per_user": "2.79",
+    "avg_engagement_time": "21s"
+  },
+  {
+    "title": "Personal Borrowing Options",
+    "path": "/personal-borrow/",
+    "views": 649,
+    "views_pct": "2.81%",
+    "active_users": 438,
+    "active_users_pct": "5.14%",
+    "views_per_user": "1.48",
+    "avg_engagement_time": "1m 18s"
+  },
+  {
+    "title": "Customer Accounts Overview",
+    "path": "/accounts/",
+    "views": 592,
+    "views_pct": "2.57%",
+    "active_users": 384,
+    "active_users_pct": "4.5%",
+    "views_per_user": "1.54",
+    "avg_engagement_time": "41s"
+  },
+  {
+    "title": "Branch Outlets Locations",
+    "path": "/outlets/",
+    "views": 583,
+    "views_pct": "2.53%",
+    "active_users": 464,
+    "active_users_pct": "5.44%",
+    "views_per_user": "1.26",
+    "avg_engagement_time": "30s"
+  },
+  {
+    "title": "Property For Sale Listings",
+    "path": "/property-sale/",
+    "views": 502,
+    "views_pct": "2.18%",
+    "active_users": 334,
+    "active_users_pct": "3.92%",
+    "views_per_user": "1.50",
+    "avg_engagement_time": "47s"
+  },
+  {
+    "title": "Tynwald Information Page",
+    "path": "/tynwald/",
+    "views": 394,
+    "views_pct": "1.71%",
+    "active_users": 270,
+    "active_users_pct": "3.17%",
+    "views_per_user": "1.46",
+    "avg_engagement_time": "45s"
+  },
+  {
+    "title": "Prepaid Visa Card Details",
+    "path": "/prepaid-visa/",
+    "views": 332,
+    "views_pct": "1.44%",
+    "active_users": 244,
+    "active_users_pct": "2.86%",
+    "views_per_user": "1.36",
+    "avg_engagement_time": "37s"
+  },
+  {
+    "title": "Self-Service Portal Access",
+    "path": "/self-service/",
+    "views": 328,
+    "views_pct": "1.42%",
+    "active_users": 209,
+    "active_users_pct": "2.45%",
+    "views_per_user": "1.57",
+    "avg_engagement_time": "40s"
+  }
+]

@@ -8,6 +8,8 @@
 	import {
 		resolveBackendContext,
 		fetchSlides,
+		fetchReportPptxBlob,
+		uploadReportSlideImage,
 		rewriteField,
 		applyEdits,
 		fetchJson,
@@ -32,11 +34,10 @@
 
 	let saving = $state(false);
 	let saveError = $state('');
-	let pdfLoading = $state(true);
-	let pdfError = $state(false);
-	let pdfCacheBust = $state(Date.now());
-
-	const pdfUrl = $derived(`${apiBaseUrl}/reports/${reportId}/preview.pdf?v=${pdfCacheBust}`);
+	let previewRendering = $state(false);
+	let previewError = $state('');
+	let previewCacheBust = $state(Date.now());
+	let rendering = false;
 
 	function initEdits(slides: Slide[]) {
 		const vals: Record<string, string> = {};
@@ -58,8 +59,12 @@
 			report = await fetchJson<Report>(apiBaseUrl, `/reports/${reportId}`);
 			slides = await fetchSlides(apiBaseUrl, reportId);
 			initEdits(slides);
-			pdfLoading = true;
-			pdfError = false;
+			previewError = '';
+			if (!slides.some((slide) => slide.image_url) && !rendering) {
+				void renderSlidesClientSide().catch((err) => {
+					previewError = err instanceof Error ? err.message : 'Slide preview render failed.';
+				});
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load report';
 		} finally {
@@ -93,10 +98,11 @@
 		try {
 			await applyEdits(apiBaseUrl, reportId, editedValues);
 			slides = await fetchSlides(apiBaseUrl, reportId);
-			// Reset PDF state and bust cache to reload the iframe
-			pdfError = false;
-			pdfLoading = true;
-			pdfCacheBust = Date.now();
+			previewError = '';
+			previewCacheBust = Date.now();
+			void renderSlidesClientSide().catch((err) => {
+				previewError = err instanceof Error ? err.message : 'Slide preview render failed.';
+			});
 
 			const suggestedName = `${report?.report_name ?? 'report'}-edited.pptx`;
 			if (isTauri) {
@@ -114,6 +120,48 @@
 	onMount(() => {
 		void load();
 	});
+
+	function slideImageUrl(slide: Slide): string | null {
+		if (!slide.image_url) return null;
+		return `${apiBaseUrl}${slide.image_url}?v=${previewCacheBust}`;
+	}
+
+	async function renderSlidesClientSide() {
+		if (rendering) return;
+		rendering = true;
+		previewRendering = true;
+		previewError = '';
+		try {
+			const pptxBuffer = await fetchReportPptxBlob(apiBaseUrl, reportId);
+			const { PPTXViewer } = await import('pptxviewjs');
+
+			const canvas = document.createElement('canvas');
+			canvas.width = 1280;
+			canvas.height = 720;
+
+			const viewer = new PPTXViewer({ canvas, slideSizeMode: 'fit' });
+			await viewer.loadFile(pptxBuffer);
+			const count = viewer.getSlideCount();
+
+			for (let i = 0; i < count; i++) {
+				await viewer.renderSlide(i, canvas);
+				const blob = await new Promise<Blob>((resolve, reject) => {
+					canvas.toBlob((b) => {
+						if (b) resolve(b);
+						else reject(new Error('toBlob returned null'));
+					}, 'image/png');
+				});
+				await uploadReportSlideImage(apiBaseUrl, reportId, i, blob);
+			}
+
+			viewer.destroy();
+			previewCacheBust = Date.now();
+			slides = await fetchSlides(apiBaseUrl, reportId);
+		} finally {
+			previewRendering = false;
+			rendering = false;
+		}
+	}
 </script>
 
 <div class="flex h-full flex-col">
@@ -160,24 +208,42 @@
 	{:else}
 		<div class="flex flex-1 overflow-hidden">
 			<div class="flex w-[60%] flex-col border-r border-border bg-muted/20 relative">
-				{#if pdfError}
+				{#if previewError}
 					<div class="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
 						<p class="text-sm">Slide preview unavailable</p>
+						<p class="max-w-md text-center text-xs">{previewError}</p>
 					</div>
 				{:else}
-					{#if pdfLoading}
+					{#if previewRendering}
 						<div class="absolute inset-0 flex items-center justify-center gap-3 text-muted-foreground bg-muted/20 z-10">
 							<Loader2 class="h-4 w-4 animate-spin" />
-							<p class="text-sm">Loading preview...</p>
+							<p class="text-sm">Rendering preview...</p>
 						</div>
 					{/if}
-					<iframe
-						src={pdfUrl}
-						title="Report Preview"
-						class="flex-1 w-full border-none"
-						onload={() => { pdfLoading = false; }}
-						onerror={() => { pdfLoading = false; pdfError = true; }}
-					></iframe>
+					<div class="flex-1 overflow-y-auto px-6 py-5">
+						<div class="mx-auto flex max-w-5xl flex-col gap-5">
+							{#each slides as slide (slide.slide_index)}
+								{@const imgUrl = slideImageUrl(slide)}
+								<div class="overflow-hidden rounded-md border border-border bg-background shadow-sm">
+									{#if imgUrl}
+										<img
+											src={imgUrl}
+											alt="Slide {slide.slide_index + 1}"
+											class="block w-full"
+										/>
+									{:else}
+										<div class="flex aspect-video items-center justify-center bg-muted text-sm text-muted-foreground">
+											{#if previewRendering}
+												<Loader2 class="h-4 w-4 animate-spin" />
+											{:else}
+												Slide {slide.slide_index + 1}
+											{/if}
+										</div>
+									{/if}
+								</div>
+							{/each}
+						</div>
+					</div>
 				{/if}
 			</div>
 

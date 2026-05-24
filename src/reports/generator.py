@@ -50,8 +50,10 @@ GA4_PROPERTIES = {
     "zimplats":     "385365994",
     "ecocash":      "386950925",
     "econet":       "386649040",
-    "ecosure":      "384507667",
+    "ecosure":      "501944307",
     "dicomm":       "382296904",
+    "delta":        "448966594",
+    "bancabc":      "403459265",
 }
 
 TEMPLATES = {
@@ -91,10 +93,34 @@ def _ga4_navigation_url(page, property_key: str, section_fragment: str) -> str:
     return _ga4_url(property_key, section_fragment)
 
 
+def _is_ga4_start_page(url: str) -> bool:
+    return "/reports/start" in url
+
+
+def _leave_ga4_start_page(page, property_key: str, section_fragment: str = "/home"):
+    if not _is_ga4_start_page(page.url):
+        return page
+    url = _ga4_navigation_url(page, property_key, section_fragment)
+    logger.info(
+        "GA4 landed on blocked start page. property=%s current_url=%s redirecting_to=%s",
+        GA4_PROPERTIES[property_key],
+        page.url,
+        url,
+    )
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    return page
+
+
 def _ensure_expected_ga4_property(page, property_key: str, timeout: int = 15000) -> None:
     expected_token = _ga4_property_token(property_key)
     page.wait_for_function(
-        "expected => window.location.href.includes(expected)",
+        """
+        expected => {
+            const href = window.location.href;
+            return href.includes(expected)
+                && !href.includes('/reports/start');
+        }
+        """,
         arg=expected_token,
         timeout=timeout,
     )
@@ -113,7 +139,9 @@ def _ensure_expected_ga4_location(page, property_key: str, section_fragment: str
         """
         ({ expectedToken, expectedSections }) => {
             const href = window.location.href;
-            return href.includes(expectedToken) && expectedSections.some(section => href.includes(section));
+            return href.includes(expectedToken)
+                && !href.includes('/reports/start')
+                && expectedSections.some(section => href.includes(section));
         }
         """,
         arg={"expectedToken": expected_token, "expectedSections": expected_sections},
@@ -221,11 +249,19 @@ def _switch_ga4_property_via_search(page, property_key: str):
 
     # Only skip click logic if GA4 *navigated* to the correct property after the fill
     # (URL must have changed to include the property token).
-    if f"p{property_id}" in page.url and page.url != url_before_fill:
+    if f"p{property_id}" in page.url and page.url != url_before_fill and not _is_ga4_start_page(page.url):
         logger.info(
             "GA4 auto-navigated to correct property after search fill. property_id=%s url=%s",
             property_id, page.url,
         )
+        try:
+            search_input.press("Escape")
+        except Exception:
+            pass
+        page.wait_for_timeout(500)
+        return page
+    if f"p{property_id}" in page.url and _is_ga4_start_page(page.url):
+        page = _leave_ga4_start_page(page, property_key)
         try:
             search_input.press("Escape")
         except Exception:
@@ -261,6 +297,7 @@ def _switch_ga4_property_via_search(page, property_key: str):
             ) from exc
 
     page = _resolve_post_click_page(page, previous_page_count)
+    page = _leave_ga4_start_page(page, property_key)
     _ensure_expected_ga4_property(page, property_key, timeout=20000)
     page.wait_for_timeout(2500)
     return page
@@ -288,6 +325,7 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
             # Only switch property via search if not already on the correct property.
             if expected_token not in page.url:
                 page = _switch_ga4_property_via_search(page, property_key)
+            page = _leave_ga4_start_page(page, property_key, section_fragment)
             url = _ga4_navigation_url(page, property_key, section_fragment)
             logger.info(
                 "Navigating to GA4 property=%s section=%s attempt=%s url=%s",
@@ -300,6 +338,7 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
                 page.goto(url, wait_until="domcontentloaded", timeout=30000)
             except Exception:
                 page.goto(url, wait_until="load", timeout=timeout)
+            page = _leave_ga4_start_page(page, property_key, section_fragment)
 
             _ensure_expected_ga4_location(page, property_key, section_fragment, timeout=15000)
             page.wait_for_timeout(3000)
@@ -410,6 +449,20 @@ def _set_date_range(page, start: str, end: str) -> None:
     page.wait_for_timeout(3000)
 
 
+def _extract_metric_value(text: str, label: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    patterns = [
+        rf"{re.escape(label)}\s+((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
+        rf"{re.escape(label)}[^\dA-Z]*((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
+        rf"((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\s+{re.escape(label)}\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, normalized, re.IGNORECASE)
+        if match:
+            return match.group(1).strip().rstrip(",")
+    return None
+
+
 def _scrape_home_metrics(page) -> dict:
     page.wait_for_selector(".metric-container", timeout=15000)
     page.wait_for_timeout(1000)
@@ -420,19 +473,6 @@ def _scrape_home_metrics(page) -> dict:
         "Returning users",
         "Average engagement time per active user",
     ]
-
-    def _extract_metric_value(text: str, label: str) -> str | None:
-        normalized = re.sub(r"\s+", " ", text).strip()
-        patterns = [
-            rf"{re.escape(label)}\s+((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
-            rf"{re.escape(label)}[^\dA-Z]*((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\b",
-            rf"((?:\d+m\s+\d+s)|(?:\d+\s*s)|(?:[\d,.]+(?:\.\d+)?[KMB]?))\s+{re.escape(label)}\b",
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, normalized, re.IGNORECASE)
-            if match:
-                return match.group(1).strip().rstrip(",")
-        return None
 
     # First pass: inspect each metric card individually using both aria-label and visible text.
     for card in page.locator(".metric-container").all():
@@ -490,6 +530,67 @@ def _scrape_home_metrics(page) -> dict:
             pass
 
     return metrics
+
+
+def _scrape_snapshot_summary_metrics(page) -> dict:
+    """Scrape the summary KPI card on the Reports snapshot page.
+
+    GA4 sometimes omits Active users from the home-page card accessibility tree while
+    still rendering it correctly in the snapshot summary card. This parser recovers
+    those headline metrics from the snapshot card so slide text and stat boxes stay in sync.
+    """
+    metrics = {}
+    label_aliases = {
+        "Active users": ("Active users",),
+        "New users": ("New users",),
+        "Average engagement time per active user": (
+            "Average engagement time per active user",
+            "Average engagement time per active us",
+        ),
+    }
+    card = page.locator("ga-card[data-guidedhelpid='summary']").first
+    try:
+        card.wait_for(state="visible", timeout=10000)
+    except Exception:
+        return metrics
+
+    sources: list[str] = []
+    try:
+        aria = card.get_attribute("aria-label") or ""
+        if aria.strip():
+            sources.append(aria)
+    except Exception:
+        pass
+    try:
+        text = card.inner_text() or ""
+        if text.strip():
+            sources.append(text)
+    except Exception:
+        pass
+
+    for source in sources:
+        for canonical_label, aliases in label_aliases.items():
+            if canonical_label in metrics:
+                continue
+            for label in aliases:
+                value = _extract_metric_value(source, label)
+                if value:
+                    metrics[canonical_label] = value
+                    break
+    return metrics
+
+
+def _backfill_missing_home_metrics(home_metrics: dict, fallback_metrics: dict) -> dict:
+    if not fallback_metrics:
+        return home_metrics
+    for label in (
+        "Active users",
+        "New users",
+        "Average engagement time per active user",
+    ):
+        if not home_metrics.get(label) and fallback_metrics.get(label):
+            home_metrics[label] = fallback_metrics[label]
+    return home_metrics
 
 
 def _scrape_snapshot_metrics(page) -> dict:
@@ -781,7 +882,7 @@ def capture_screenshots_and_metrics(
 
             # --- Reports Snapshot: set date range + scrape metrics ---
             _ensure_expected_ga4_property(page, report_name)
-            page.get_by_text("View reports snapshot").click()
+            page.locator("span.view-link-text", has_text="View reports snapshot").click()
             page.wait_for_timeout(3000)
             _ensure_expected_ga4_property(page, report_name)
             snapshot_date_btn = page.get_by_role("combobox", name="Open date range picker")
@@ -806,6 +907,10 @@ def capture_screenshots_and_metrics(
             page.get_by_role("button", name="Apply").click()
             page.wait_for_timeout(3000)
             snapshot_metrics = _scrape_snapshot_metrics(page)
+            home_metrics = _backfill_missing_home_metrics(
+                home_metrics,
+                _scrape_snapshot_summary_metrics(page),
+            )
 
             # --- Snapshot KPI card screenshot (Active users / New users / Avg engagement + line chart) ---
             try:
@@ -822,7 +927,7 @@ def capture_screenshots_and_metrics(
 
             # --- Countries table screenshot for slide 6 ---
             try:
-                page.get_by_text("View countries").click()
+                page.locator("span.view-link-text", has_text="View countries").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
@@ -875,7 +980,7 @@ def capture_screenshots_and_metrics(
                 page.go_back()
                 page.wait_for_timeout(3000)
                 _ensure_expected_ga4_property(page, report_name)
-                page.get_by_role("button", name="View pages and screens", exact=True).click()
+                page.locator("span.view-link-text", has_text="View pages and screens").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first

@@ -54,6 +54,30 @@ fn get_backend_startup_status(state: State<'_, BackendState>) -> BackendStartupS
 }
 
 #[tauri::command]
+fn restart_backend(
+    app: tauri::AppHandle,
+    state: State<'_, BackendState>,
+) -> Result<BackendStartupStatus, String> {
+    let existing_child = {
+        let mut guard = state.child.lock().map_err(|err| err.to_string())?;
+        guard.take()
+    };
+
+    if let Some(child) = existing_child {
+        let _ = child.kill();
+    }
+
+    let child = spawn_backend(&app)?;
+    {
+        let mut guard = state.child.lock().map_err(|err| err.to_string())?;
+        *guard = Some(child);
+    }
+
+    let startup = state.startup.lock().map_err(|err| err.to_string())?.clone();
+    Ok(startup)
+}
+
+#[tauri::command]
 async fn download_report(
     _app: tauri::AppHandle,
     backend_url: String,
@@ -212,6 +236,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
             get_backend_startup_status,
+            restart_backend,
             download_report
         ])
         .setup(|app| {

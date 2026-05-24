@@ -51,7 +51,9 @@
 		{ value: 'ecosure', label: 'Ecosure', source: 'builtin' },
 		{ value: 'zimplats', label: 'Zimplats', source: 'builtin' },
 		{ value: 'cancer_serve', label: 'Cancer Serve', source: 'builtin' },
-		{ value: 'dicomm', label: 'Dicomm McCann', source: 'builtin' }
+		{ value: 'dicomm', label: 'Dicomm McCann', source: 'builtin' },
+		{ value: 'delta', label: 'Delta', source: 'builtin' },
+		{ value: 'bancabc', label: 'BancABC', source: 'builtin' }
 	];
 
 	let reportOptions = $state<ReportOption[]>(FALLBACK_REPORT_OPTIONS);
@@ -86,6 +88,9 @@
 	let startDateRaw = $state('');
 	let endDateRaw = $state('');
 	let reportDateRaw = $state('');
+	let slide1Name = $state('');
+	let slide1LogoDataUrl = $state('');
+	let slide1LogoFileName = $state('');
 
 	function toGA4Date(raw: string): string {
 		if (!raw) return '';
@@ -111,6 +116,19 @@
 	const startDate = $derived(toGA4Date(startDateRaw));
 	const endDate = $derived(toGA4Date(endDateRaw));
 	const reportDate = $derived(toReportDate(reportDateRaw));
+	const selectedReportLabel = $derived(
+		reportOptions.find((option) => option.value === reportName)?.label ?? reportName
+	);
+	const preserveSlide1Logo = $derived(
+		reportName === 'dicomm' || selectedReportLabel.trim().toLowerCase() === 'dicomm mccann'
+	);
+
+	$effect(() => {
+		if (preserveSlide1Logo) {
+			slide1LogoDataUrl = '';
+			slide1LogoFileName = '';
+		}
+	});
 
 	const today = new Date().toISOString().slice(0, 10);
 	const dateValidationError = $derived((() => {
@@ -198,8 +216,33 @@
 		// Parse "03 March 2026" back to YYYY-MM-DD
 		reportDateRaw = toLocalISO(report.report_date);
 		reportName = report.report_name;
+		slide1Name = '';
+		slide1LogoDataUrl = '';
+		slide1LogoFileName = '';
 		generateError = '';
 		generateOpen = true;
+	}
+
+	function handleLogoChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		slide1LogoDataUrl = '';
+		slide1LogoFileName = '';
+		if (preserveSlide1Logo) {
+			input.value = '';
+			return;
+		}
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			slide1LogoDataUrl = typeof reader.result === 'string' ? reader.result : '';
+			slide1LogoFileName = file.name;
+		};
+		reader.onerror = () => {
+			generateError = 'Could not read the selected logo file.';
+		};
+		reader.readAsDataURL(file);
 	}
 
 	async function downloadReport(report: Report) {
@@ -270,7 +313,11 @@
 					date_range: dateRange,
 					report_date: reportDate,
 					start_date: startDate,
-					end_date: endDate
+					end_date: endDate,
+					slide1_source_name: selectedReportLabel,
+					slide1_name: slide1Name.trim(),
+					slide1_logo_data_url: slide1LogoDataUrl,
+					slide1_logo_filename: slide1LogoFileName
 				})
 			});
 			generateOpen = false;
@@ -575,6 +622,33 @@
 				{#if reportDate}
 					<p class="text-xs text-muted-foreground">Formatted: <span class="text-foreground/70">{reportDate}</span></p>
 				{/if}
+			</div>
+
+			<div class="space-y-3 rounded-md border border-border bg-muted/20 p-3">
+				<div class="space-y-1">
+					<Label>Slide 1 Name</Label>
+					<input
+						type="text"
+						bind:value={slide1Name}
+						placeholder="Leave blank to keep the template name"
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+					/>
+				</div>
+				<div class="space-y-1">
+					<Label>Slide 1 Top Left Logo</Label>
+					<input
+						type="file"
+						accept="image/png,image/jpeg,image/jpg,image/gif,image/bmp,image/tiff"
+						onchange={handleLogoChange}
+						disabled={preserveSlide1Logo}
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs file:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+					/>
+					{#if preserveSlide1Logo}
+						<p class="text-xs text-muted-foreground">Dicomm McCann keeps the template logo.</p>
+					{:else if slide1LogoFileName}
+						<p class="text-xs text-muted-foreground">{slide1LogoFileName}</p>
+					{/if}
+				</div>
 			</div>
 
 			<div class="flex justify-end gap-3 pt-2">

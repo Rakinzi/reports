@@ -253,6 +253,7 @@ def _collect_weekly_active_users(page, start_date: str, end_date: str) -> dict[s
 def _collect_acquisition_metrics(page) -> dict[str, int]:
     acquisition: dict[str, int] = {}
     try:
+        page = _open_reports_snapshot(page)
         page.get_by_role("button", name="View user acquisition", exact=True).click()
         page.wait_for_timeout(4000)
         body = page.locator("body").inner_text()
@@ -265,10 +266,18 @@ def _collect_acquisition_metrics(page) -> dict[str, int]:
     return acquisition
 
 
+def _open_reports_snapshot(page):
+    """Open the GA4 snapshot layout that contains the countries/pages drilldowns."""
+    page.locator("span.view-link-text", has_text="View reports snapshot").click()
+    page.wait_for_timeout(3000)
+    return page
+
+
 def _collect_page_views(page) -> dict[str, int]:
     page_views: dict[str, int] = {}
     try:
-        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page = _open_reports_snapshot(page)
+        page.locator("span.view-link-text", has_text="View pages and screens").click()
         page.wait_for_timeout(4000)
         body = page.locator("body").inner_text()
         for line in [text.strip() for text in body.splitlines() if text.strip()]:
@@ -480,14 +489,14 @@ def _capture_single_image_field(
         page.screenshot(path=str(out_path), clip={"x": 0, "y": 0, "width": 1920, "height": 600})
     elif field_type == "screenshot_countries_table":
         page = _restore_property_home(page, ga4_property_id)
-        page.get_by_text("View reports snapshot").click()
-        page.wait_for_timeout(3000)
-        page.get_by_text("View countries").click()
+        page = _open_reports_snapshot(page)
+        page.locator("span.view-link-text", has_text="View countries").click()
         page.wait_for_timeout(4000)
         page.screenshot(path=str(out_path), full_page=True)
     elif field_type == "screenshot_pages_table":
         page = _restore_property_home(page, ga4_property_id)
-        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page = _open_reports_snapshot(page)
+        page.locator("span.view-link-text", has_text="View pages and screens").click()
         page.wait_for_timeout(4000)
         page.screenshot(path=str(out_path), full_page=True)
     elif field_type == "screenshot_search_console":

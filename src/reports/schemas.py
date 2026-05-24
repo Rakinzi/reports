@@ -5,7 +5,8 @@ _GA4_DATE_FMT = "%b %d, %Y"  # e.g. "Feb 1, 2026"
 
 HARDCODED_REPORT_NAMES: frozenset[str] = frozenset({
     "econet", "econet_ai", "infraco", "ecocash",
-    "ecosure", "zimplats", "cancer_serve", "dicomm",
+    "ecosure", "zimplats", "cancer_serve", "dicomm", "delta",
+    "bancabc",
 })
 
 
@@ -15,6 +16,10 @@ class GenerateReportRequest(BaseModel):
     report_date: str         # e.g. "03 March 2026"
     start_date: str          # GA4 picker format e.g. "Feb 1, 2026"
     end_date: str            # GA4 picker format e.g. "Feb 28, 2026"
+    slide1_source_name: str = ""
+    slide1_name: str = ""
+    slide1_logo_data_url: str = ""
+    slide1_logo_filename: str = ""
 
     @field_validator("report_name")
     @classmethod

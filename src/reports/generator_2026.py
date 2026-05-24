@@ -11,6 +11,7 @@ import os
 import re
 from copy import deepcopy
 from pathlib import Path
+from urllib.parse import parse_qsl, quote as urlquote, urlencode, urlsplit, urlunsplit
 
 import lxml.etree as etree
 from google import genai
@@ -30,14 +31,17 @@ from .runtime import (
 # Re-use browser/navigation helpers from the old module — they are pure utilities
 # with no dependency on the old pipeline's data model.
 from .generator import (
+    _backfill_missing_home_metrics,
     _ensure_expected_ga4_property,
     _fill_text_run,
     _ga4_property_token,
     _ga4_url,
     _goto_ga4_section,
+    _leave_ga4_start_page,
     _launch_persistent_context,
     _replace_image_in_slide,
     _scrape_home_metrics,
+    _scrape_snapshot_summary_metrics,
     _scrape_snapshot_metrics,
     _set_date_range,
     _switch_ga4_property_via_search,
@@ -62,8 +66,10 @@ GA4_PROPERTIES_2026: dict[str, str] = {
     "zimplats":     "385365994",
     "ecocash":      "386950925",
     "econet":       "386649040",
-    "ecosure":      "384507667",
+    "ecosure":      "501944307",
     "dicomm":       "382296904",
+    "delta":        "448966594",
+    "bancabc":      "403459265",
 }
 
 TEMPLATES_2026: dict[str, str] = {
@@ -71,10 +77,12 @@ TEMPLATES_2026: dict[str, str] = {
     "econet_ai":    "new/Econet AI March Website Report.pptx",
     "infraco":      "new/Econet Infraco March Website Report.pptx",
     "ecocash":      "new/EcoCash March Website Report.pptx",
-    "ecosure":      "new/Ecosure January 2026 Website Report (1).pptx",
+    "ecosure":      "new/Ecosure March Website Report.pptx",
     "zimplats":     "new/Zimplats March Website Report.pptx",
     "cancer_serve": "new/Cancerserve March Website Report.pptx",
     "dicomm":       "new/Dicomm March Website Report.pptx",
+    "delta":        "new/Delta Website Report - March .pptx",
+    "bancabc":      "new/Delta Website Report - March .pptx",
 }
 
 # 7-slide variants skip Slide 6 (Search Performance)
@@ -86,10 +94,24 @@ GSC_URLS: dict[str, str] = {
     "econet_ai":    "https://econetai.co.zw/",
     "infraco":      "https://infraco.co.zw/",
     "ecocash":      "https://www.ecocash.co.zw/",
-    "ecosure":      "https://www.ecosure.co.zw/",
+    "ecosure":      "https://ecosure.co.zw/",
     "cancer_serve": "https://www.cancerserve.org/",
     "dicomm":       "https://www.dicomm.co.zw/",
+    "delta":        "https://delta.co.zw/",
+    "bancabc":      "https://www.bancabc.co.zw/",
 }
+
+REPORT_DISPLAY_NAMES: dict[str, str] = {
+    "bancabc": "BancABC",
+}
+
+BORROWED_TEMPLATE_SOURCE_NAMES: dict[str, str] = {
+    "bancabc": "Delta",
+}
+
+
+def _report_display_name(report_name: str) -> str:
+    return REPORT_DISPLAY_NAMES.get(report_name, report_name.replace("_", " ").title())
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +228,7 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
     """Slide 2 — KPI values + narratives for para 0 and para 2."""
     active_users = home_metrics.get("Active users", "N/A")
     new_users = home_metrics.get("New users", "N/A")
-    brand = report_name.replace("_", " ").title()
+    brand = _report_display_name(report_name)
 
     # GA4 already returns shorthand like "27K" — use as-is, only convert if raw number
     try:
@@ -291,7 +313,7 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
     active_users = home_metrics.get("Active users", "N/A")
     new_users = home_metrics.get("New users", "N/A")
     engagement = home_metrics.get("Average engagement time per active user", "N/A")
-    brand = report_name.replace("_", " ").title()
+    brand = _report_display_name(report_name)
 
     def _parse_num(val: str) -> int:
         s = str(val).strip().replace(",", "")
@@ -682,10 +704,103 @@ def _page_perf_paras(pages_data: list[dict], site_total_views: int = 0) -> tuple
 # GSC capture helper
 # ---------------------------------------------------------------------------
 
+def _gsc_property_candidates(site_url: str) -> tuple[list[str], list[str]]:
+    parsed = urlsplit(site_url if "://" in site_url else f"https://{site_url}")
+    host = (parsed.netloc or parsed.path).strip().strip("/")
+    host = host.split("@")[-1].split(":")[0]
+    root_host = host[4:] if host.startswith("www.") else host
+    www_host = host if host.startswith("www.") else f"www.{root_host}"
+
+    direct_candidates = [
+        f"sc-domain:{root_host}",
+        f"https://{root_host}/",
+        f"https://{www_host}/",
+        f"http://{root_host}/",
+        f"http://{www_host}/",
+    ]
+    search_terms = [root_host, www_host, f"https://{root_host}/", f"https://{www_host}/"]
+
+    def dedupe(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            if value and value not in seen:
+                seen.add(value)
+                result.append(value)
+        return result
+
+    return dedupe(direct_candidates), dedupe(search_terms)
+
+
+def _gsc_performance_url(resource_id: str, start_dt=None, end_dt=None) -> str:
+    url = (
+        "https://search.google.com/search-console/performance/search-analytics"
+        f"?resource_id={urlquote(resource_id, safe='')}"
+    )
+    if start_dt and end_dt:
+        url += f"&start_date={start_dt.strftime('%Y%m%d')}&end_date={end_dt.strftime('%Y%m%d')}"
+    return url
+
+
+def _gsc_current_resource_id(page, fallback: str) -> str:
+    query_params = dict(parse_qsl(urlsplit(page.url).query, keep_blank_values=True))
+    return query_params.get("resource_id") or fallback
+
+
+def _gsc_has_performance_data(page, timeout: int = 12000) -> bool:
+    try:
+        page.wait_for_selector("text=Total clicks", state="attached", timeout=timeout)
+        return True
+    except Exception:
+        return False
+
+
+def _open_gsc_performance_property(page, site_url: str) -> str:
+    direct_candidates, search_terms = _gsc_property_candidates(site_url)
+
+    for resource_id in direct_candidates:
+        logger.info("[2026] Trying GSC resource_id=%s", resource_id)
+        page.goto(_gsc_performance_url(resource_id), wait_until="domcontentloaded", timeout=30000)
+        if _gsc_has_performance_data(page):
+            page.wait_for_timeout(1000)
+            return _gsc_current_resource_id(page, resource_id)
+
+    page.goto("https://search.google.com/search-console/", wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2000)
+
+    for term in search_terms:
+        try:
+            logger.info("[2026] Searching GSC property selector for %s", term)
+            page.locator('div[jscontroller="Jdbz6e"]').first.click(timeout=10000)
+            page.wait_for_timeout(800)
+            prop_input = page.get_by_role("combobox").first
+            prop_input.click(click_count=3, timeout=10000)
+            prop_input.fill(term)
+            page.wait_for_timeout(1200)
+
+            result = page.locator("[data-initialvalue]").filter(has_text=term).first
+            if not result.is_visible(timeout=4000):
+                result = page.get_by_text(term, exact=False).last
+            result.click(timeout=10000)
+            page.wait_for_timeout(3000)
+            if _gsc_has_performance_data(page, timeout=8000):
+                return _gsc_current_resource_id(page, term)
+            page.goto(
+                "https://search.google.com/search-console/performance/search-analytics",
+                wait_until="domcontentloaded",
+                timeout=30000,
+            )
+            if _gsc_has_performance_data(page, timeout=8000):
+                return _gsc_current_resource_id(page, term)
+        except Exception as exc:
+            logger.warning("[2026] GSC selector search failed for %s: %s", term, exc)
+
+    raise RuntimeError(f"Could not open GSC property for {site_url}. Tried {direct_candidates + search_terms}")
+
+
 def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_dir: Path) -> tuple[dict, dict]:
     """Open GSC, select the correct property, set custom date range, scrape metrics + screenshot."""
     from datetime import datetime as _dt
-    from urllib.parse import quote as _quote
 
     start_dt = _dt.strptime(start_date, "%b %d, %Y")
     end_dt   = _dt.strptime(end_date,   "%b %d, %Y")
@@ -700,32 +815,10 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
 
     gsc_page = context.new_page()
 
-    # 1. Go to GSC performance page for this property directly via URL
-    gsc_page.goto(
-        "https://search.google.com/search-console/performance/search-analytics"
-        f"?resource_id={_quote(gsc_site, safe='')}",
-        wait_until="domcontentloaded", timeout=30000,
-    )
-    gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
-    gsc_page.wait_for_timeout(1000)
-
-    # 2. Click the property selector pill to confirm/switch property
-    try:
-        gsc_page.locator('div[jscontroller="Jdbz6e"]').click()
-        gsc_page.wait_for_timeout(800)
-
-        # Use the active combobox input — exact=True to avoid matching "Inspect any URL in..."
-        prop_input = gsc_page.get_by_role("combobox", name=gsc_site, exact=True)
-        prop_input.click(click_count=3)
-        prop_input.fill(gsc_site)
-        gsc_page.wait_for_timeout(800)
-
-        # Click the matching result that appears in the dropdown list
-        gsc_page.locator(f'[data-initialvalue="{gsc_site}"]').first.click()
-        gsc_page.wait_for_timeout(2000)
-        gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=10000)
-    except Exception as e:
-        logger.warning("[2026] GSC property selector failed (continuing): %s", e)
+    # 1. Open the GSC performance page for this property. Prefer direct resource IDs,
+    # then fall back to the property picker search using the bare host.
+    selected_resource = _open_gsc_performance_property(gsc_page, gsc_site)
+    logger.info("[2026] GSC property selected for %s using %s", report_name, selected_resource)
 
     # 3. Set custom date range.
     #    Some GSC instances show "Custom" directly in the toolbar; others hide it under "More".
@@ -769,14 +862,8 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
         except Exception:
             pass
         gsc_page = context.new_page()
-        gsc_page.goto(
-            "https://search.google.com/search-console/performance/search-analytics"
-            f"?resource_id={_quote(gsc_site, safe='')}"
-            f"&start_date={start_dt.strftime('%Y%m%d')}"
-            f"&end_date={end_dt.strftime('%Y%m%d')}",
-            wait_until="domcontentloaded", timeout=30000,
-        )
-        gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=15000)
+        gsc_page.goto(_gsc_performance_url(selected_resource, start_dt, end_dt), wait_until="domcontentloaded", timeout=30000)
+        gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
         gsc_page.wait_for_timeout(2000)
 
     # 5. Scrape metrics
@@ -846,6 +933,195 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
 # GA4 capture — 2026 pipeline only
 # ---------------------------------------------------------------------------
 
+def _dismiss_playwright_overlays(page) -> None:
+    """Clear hover tooltips and transient overlays before screenshots."""
+    try:
+        page.keyboard.press("Escape")
+    except Exception:
+        pass
+
+    try:
+        viewport = page.viewport_size or {"width": 1280, "height": 720}
+        page.mouse.move(max(1, viewport["width"] - 2), max(1, viewport["height"] - 2))
+        page.wait_for_timeout(800)
+    except Exception:
+        pass
+
+
+def _log_main_frame_navigations(page, label: str) -> None:
+    def _log(frame) -> None:
+        try:
+            if frame == page.main_frame:
+                logger.info("[2026] Playwright URL (%s): %s", label, frame.url)
+        except Exception:
+            pass
+
+    page.on("framenavigated", _log)
+
+
+def _ga4_report_route(url: str) -> str | None:
+    match = re.search(r"#/[^/]*p\d+(/reports/[^?&]+)", url)
+    return match.group(1) if match else None
+
+
+def _ga4_report_query_params(url: str) -> dict[str, str]:
+    fragment_query = urlsplit(url).fragment.partition("?")[2]
+    return dict(parse_qsl(fragment_query, keep_blank_values=True))
+
+
+def _with_ga4_fragment_query_params(url: str, params: dict[str, str]) -> str:
+    if not params:
+        return url
+
+    parts = urlsplit(url)
+    fragment_path, separator, fragment_query = parts.fragment.partition("?")
+    query_params = dict(parse_qsl(fragment_query, keep_blank_values=True))
+    query_params.update(params)
+    fragment = fragment_path
+    if query_params:
+        fragment = f"{fragment_path}{separator or '?'}{urlencode(query_params)}"
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, parts.query, fragment))
+
+
+def _restore_snapshot_route_after_date_apply(page, report_name: str, snapshot_url: str):
+    """Keep GA4 on the snapshot report that was opened by the snapshot CTA."""
+    if "/reports/start" not in page.url:
+        return page
+
+    snapshot_route = _ga4_report_route(snapshot_url)
+    snapshot_query = {
+        key: value
+        for key, value in _ga4_report_query_params(snapshot_url).items()
+        if key in {"r"}
+    }
+    if not snapshot_route or snapshot_route == "/reports/start":
+        page = _leave_ga4_start_page(page, report_name, "/reports/overview")
+        fallback_url = _with_ga4_fragment_query_params(page.url, snapshot_query)
+        if fallback_url != page.url:
+            page.goto(fallback_url, wait_until="domcontentloaded", timeout=30000)
+        return page
+
+    restored_url = re.sub(
+        r"(#/[^/]*p\d+)/reports/start",
+        rf"\1{snapshot_route}",
+        page.url,
+        count=1,
+    )
+    restored_url = _with_ga4_fragment_query_params(restored_url, snapshot_query)
+    if restored_url == page.url:
+        return _leave_ga4_start_page(page, report_name, snapshot_route)
+
+    logger.info(
+        "[2026] Restoring GA4 snapshot route after date apply. route=%s current_url=%s",
+        snapshot_route,
+        page.url,
+    )
+    page.goto(restored_url, wait_until="domcontentloaded", timeout=30000)
+    return page
+
+
+def _return_to_snapshot_dashboard(page, report_name: str, snapshot_url: str):
+    """Return to the same reporting-hub dashboard instead of relying on GA4 history."""
+    if page.url != snapshot_url:
+        logger.info("[2026] Returning to snapshot dashboard URL: %s", snapshot_url)
+        page.goto(snapshot_url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_function(
+        """
+        () => {
+            const href = window.location.href;
+            return href.includes('/reports/dashboard') &&
+                   href.includes('r=reporting-hub') &&
+                   !href.includes('/reports/start');
+        }
+        """,
+        timeout=20000,
+    )
+    _ensure_expected_ga4_property(page, report_name)
+    page.locator("ga-card[data-guidedhelpid='summary']").first.wait_for(state="visible", timeout=15000)
+    return page
+
+
+def _ga4_report_base_url(url: str) -> str:
+    match = re.search(r"^(https://analytics\.google\.com/analytics/web/#/[^/]*p\d+)", url)
+    if not match:
+        raise ValueError(f"Could not determine GA4 report base URL from {url}")
+    return match.group(1)
+
+
+def _ga4_snapshot_params(snapshot_url: str) -> str:
+    fragment_query = urlsplit(snapshot_url).fragment.partition("?")[2]
+    query_params = dict(parse_qsl(fragment_query, keep_blank_values=True))
+    return query_params.get("params", "")
+
+
+def _ga4_explorer_url(snapshot_url: str, report_kind: str) -> str:
+    base_url = _ga4_report_base_url(snapshot_url)
+    params = dict(parse_qsl(_ga4_snapshot_params(snapshot_url), keep_blank_values=True))
+    params.setdefault("_u.comparisonOption", "disabled")
+    params["_u..nav"] = "maui"
+
+    if report_kind == "countries":
+        report_id = "user-demographics-detail"
+        params["_r.explorerCard..selmet"] = '["activeUsers"]'
+        params["_r.explorerCard..seldim"] = '["country"]'
+        query_parts = {
+            "r": report_id,
+            "params": "&".join(f"{key}={value}" for key, value in params.items()),
+            "ruid": "user-demographics-detail,user,demographics",
+            "collectionId": "user",
+        }
+    elif report_kind == "pages":
+        report_id = "all-pages-and-screens"
+        params["_r.explorerCard..selmet"] = '["screenPageViews"]'
+        params["_r.explorerCard..seldim"] = '["unifiedScreenClass"]'
+        query_parts = {
+            "r": report_id,
+            "params": "&".join(f"{key}={value}" for key, value in params.items()),
+            "ruid": "all-pages-and-screens,life-cycle,engagement",
+        }
+    else:
+        raise ValueError(f"Unknown GA4 explorer report kind: {report_kind}")
+
+    query = "&".join(f"{key}={urlquote(value, safe='')}" for key, value in query_parts.items())
+    return f"{base_url}/reports/explorer?{query}"
+
+
+def _goto_snapshot_explorer(page, report_name: str, snapshot_url: str, report_kind: str):
+    target_url = _ga4_explorer_url(snapshot_url, report_kind)
+    logger.info("[2026] Navigating directly to GA4 %s explorer: %s", report_kind, target_url)
+    page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_function(
+        """
+        ({ reportKind }) => {
+            const href = window.location.href;
+            const expected = reportKind === 'countries'
+                ? 'r=user-demographics-detail'
+                : 'r=all-pages-and-screens';
+            return href.includes('/reports/explorer') &&
+                   href.includes(expected) &&
+                   href.includes('date00%3D') &&
+                   href.includes('date01%3D') &&
+                   !href.includes('/reports/start');
+        }
+        """,
+        arg={"reportKind": report_kind},
+        timeout=20000,
+    )
+    _ensure_expected_ga4_property(page, report_name)
+    return page
+
+
+def _capture_snapshot_card(page, out_dir: Path, screenshots: dict[str, Path]) -> None:
+    """Capture the dated reporting-hub summary card before any drilldown navigation."""
+    card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
+    card_el.wait_for(state="visible", timeout=20000)
+    _dismiss_playwright_overlays(page)
+    path = out_dir / "snapshot_card.png"
+    card_el.screenshot(path=str(path))
+    screenshots["snapshot_card"] = path
+    logger.info("[2026] Captured dated snapshot card screenshot: %s", path)
+
+
 def capture_2026(
     report_name: str,
     start_date: str,
@@ -877,6 +1153,7 @@ def capture_2026(
         try:
             page = context.new_page()
             page.bring_to_front()
+            _log_main_frame_navigations(page, report_name)
 
             # --- Switch to correct GA4 property ---
             _stage("Switching GA4 property...")
@@ -897,9 +1174,7 @@ def capture_2026(
             try:
                 chart_el = page.locator("ga-card.card_0 ga-tab-chart")
                 chart_el.wait_for(state="visible", timeout=10000)
-                page.mouse.move(0, 0)
-                page.mouse.click(0, 0)
-                page.wait_for_timeout(800)
+                _dismiss_playwright_overlays(page)
                 path = out_dir / "home_chart.png"
                 chart_el.screenshot(path=str(path))
                 screenshots["home_chart"] = path
@@ -908,36 +1183,26 @@ def capture_2026(
 
             # --- Navigate to Reports Snapshot via the confirmed button ---
             _stage("Capturing GA4 snapshot metrics...")
-            _ensure_expected_ga4_property(page, report_name)
-            page.locator("span.view-link-text", has_text="View reports snapshot").click()
-            page.wait_for_timeout(4000)
-            _ensure_expected_ga4_property(page, report_name)
+            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+            snapshot_dashboard_url = page.url
 
-            # Set date range on snapshot page
-            _set_date_range(page, start_date, end_date)
-            page.wait_for_timeout(3000)
+            # Capture immediately after Apply + dashboard reload, before scraping or drilldowns.
+            try:
+                _capture_snapshot_card(page, out_dir, screenshots)
+            except Exception as e:
+                logger.warning("[2026] Snapshot KPI card screenshot failed: %s", e)
 
             snapshot_metrics = _scrape_snapshot_metrics(page)
-
-            # --- Snapshot KPI card screenshot (Slide 1) ---
-            try:
-                card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
-                card_el.wait_for(state="visible", timeout=10000)
-                page.mouse.move(0, 0)
-                page.mouse.click(0, 0)
-                page.wait_for_timeout(800)
-                path = out_dir / "snapshot_card.png"
-                card_el.screenshot(path=str(path))
-                screenshots["snapshot_card"] = path
-            except Exception:
-                pass
+            home_metrics = _backfill_missing_home_metrics(
+                home_metrics,
+                _scrape_snapshot_summary_metrics(page),
+            )
 
             # --- Countries table: screenshot + scrape rich data (Slide 4) ---
             _stage("Capturing countries data...")
             try:
-                page.get_by_text("View countries").click()
+                page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "countries")
                 page.wait_for_timeout(4000)
-                _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
                 end_col = page.locator("th.cdk-column-DEFAULT-engagedSessionsPerUser").first
                 row_num_col.wait_for(state="visible", timeout=10000)
@@ -979,18 +1244,16 @@ def capture_2026(
                             "engaged_sessions_per_user": m.group(6),
                         })
 
-                page.go_back()
-                page.wait_for_timeout(3000)
-                _ensure_expected_ga4_property(page, report_name)
-            except Exception:
-                pass
+                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+            except Exception as e:
+                logger.warning("[2026] Countries capture failed: %s", e)
 
             # --- Pages and screens: screenshot + scrape page views (Slide 5) ---
             _stage("Capturing pages & screens data...")
             try:
-                page.get_by_role("button", name="View pages and screens", exact=True).click()
+                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+                page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
                 page.wait_for_timeout(4000)
-                _ensure_expected_ga4_property(page, report_name)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
                 end_col = page.locator("th.cdk-column-DEFAULT-userEngagementDurationPerUser").first
                 table = page.locator("table.adv-table").first
@@ -1048,6 +1311,48 @@ def _performance_month(date_range: str) -> str:
     return match.group(0).replace(" ", ",") if match else ""
 
 
+def _replace_picture_with_fallback(
+    slide,
+    image_path: Path,
+    *,
+    candidate_names: tuple[str, ...] = (),
+    min_left_emu: int | None = None,
+    exclude_names: set[str] | None = None,
+    slot_label: str = "picture",
+) -> bool:
+    """Replace a picture by known name, then fall back to the largest eligible picture."""
+    exclude_names = exclude_names or set()
+    picture_shapes = [
+        shape for shape in slide.shapes
+        if getattr(shape, "shape_type", None) == 13 and shape.name not in exclude_names
+    ]
+    picture_names = {shape.name for shape in picture_shapes}
+    for candidate in candidate_names:
+        if candidate in picture_names:
+            _replace_image_in_slide(slide, image_path, shape_name=candidate)
+            logger.info("[2026] Replaced %s using shape '%s'", slot_label, candidate)
+            return True
+
+    if candidate_names:
+        logger.warning(
+            "[2026] Expected shape(s) %s not found for %s; falling back to geometry",
+            ", ".join(candidate_names),
+            slot_label,
+        )
+
+    eligible = picture_shapes
+    if min_left_emu is not None:
+        eligible = [shape for shape in eligible if shape.left > min_left_emu]
+    if not eligible:
+        logger.warning("[2026] No eligible picture found for %s", slot_label)
+        return False
+
+    largest = max(eligible, key=lambda shape: (shape.width or 0) * (shape.height or 0))
+    _replace_image_in_slide(slide, image_path, shape_name=largest.name)
+    logger.info("[2026] Replaced %s using fallback shape '%s'", slot_label, largest.name)
+    return True
+
+
 # Per-template picture name for the KPI card slot on Slide 1 (right-side image).
 # "Picture 11" is always the footer logo — the KPI card is the other right-side picture.
 _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
@@ -1058,7 +1363,104 @@ _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
     "zimplats":     "Picture 15",
     "cancer_serve": "Picture 12",
     "dicomm":       "Picture 10",
+    "delta":        "Picture 12",
+    "bancabc":      "Picture 12",
 }
+
+_SLIDE3_SNAPSHOT_CARD_PICTURE: dict[str, str] = {
+    "econet":       "Picture 19",
+    "econet_ai":    "Picture 18",
+    "infraco":      "Picture 19",
+    "ecocash":      "Picture 19",
+    "zimplats":     "Picture 19",
+    "cancer_serve": "Picture 18",
+    "dicomm":       "Picture 18",
+    "delta":        "Picture 20",
+    "bancabc":      "Picture 20",
+}
+
+_SLIDE4_COUNTRIES_TABLE_PICTURE: dict[str, str] = {
+    "econet":       "Picture 9",
+    "econet_ai":    "Picture 10",
+    "infraco":      "Picture 9",
+    "ecocash":      "Picture 9",
+    "zimplats":     "Picture 9",
+    "cancer_serve": "Picture 10",
+    "dicomm":       "Picture 10",
+    "delta":        "Picture 11",
+    "bancabc":      "Picture 11",
+}
+
+_SLIDE5_PAGES_TABLE_PICTURE: dict[str, str] = {
+    "econet":       "Picture 10",
+    "econet_ai":    "Picture 11",
+    "infraco":      "Picture 10",
+    "ecocash":      "Picture 10",
+    "zimplats":     "Picture 10",
+    "cancer_serve": "Picture 11",
+    "dicomm":       "Picture 11",
+    "delta":        "Picture 10",
+    "bancabc":      "Picture 10",
+}
+
+_SLIDE6_SEARCH_CONSOLE_PICTURE: dict[str, str] = {
+    "econet":       "Picture 8",
+    "econet_ai":    "Picture 8",
+    "infraco":      "Picture 9",
+    "ecocash":      "Picture 20",
+    "cancer_serve": "Picture 8",
+    "delta":        "Picture 9",
+    "bancabc":      "Picture 9",
+}
+
+
+_SLIDE3_NARRATIVE_SHAPE: dict[str, str] = {
+    "delta":   "object 16",
+    "bancabc": "object 16",
+}
+
+_SLIDE5_NARRATIVE_SHAPE: dict[str, str] = {
+    "delta":   "object 6",
+    "bancabc": "object 6",
+}
+
+_RECOMMENDATIONS_TEXT_SHAPE: dict[str, str] = {
+    "delta":   "object 4",
+    "bancabc": "object 4",
+}
+
+
+def _shape_by_name(slide, shape_name: str):
+    return next((shape for shape in slide.shapes if shape.name == shape_name), None)
+
+
+def _non_empty_paragraphs(shape) -> list:
+    if not shape or not getattr(shape, "has_text_frame", False):
+        return []
+    return [para for para in shape.text_frame.paragraphs if para.text.strip()]
+
+
+def _fill_paragraph_slots(
+    shape,
+    values: list[str],
+    *,
+    bold_words: set[str] | None = None,
+    clear_extra: bool = False,
+    skip_first: int = 0,
+) -> bool:
+    """Fill a text shape's non-empty paragraphs in order."""
+    paras = _non_empty_paragraphs(shape)
+    if skip_first:
+        paras = paras[skip_first:]
+    if not paras:
+        return False
+
+    for idx, para in enumerate(paras):
+        if idx < len(values):
+            _write_para_with_highlights(para, values[idx], bold_words=bold_words)
+        elif clear_extra:
+            _fill_text_run(para, "")
+    return True
 
 
 def _build_slide1(slide, performance_month: str, screenshots: dict, report_name: str = "") -> None:
@@ -1072,17 +1474,14 @@ def _build_slide1(slide, performance_month: str, screenshots: dict, report_name:
 
     if "snapshot_card" in screenshots:
         pic_name = _SLIDE1_KPI_CARD_PICTURE.get(report_name)
-        if pic_name:
-            _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=pic_name)
-        else:
-            # Fallback: replace the largest right-side picture (left > 5 inches)
-            EMU = 914400
-            right_pics = [
-                s for s in slide.shapes
-                if s.shape_type == 13 and s.left > 5 * EMU and s.name != "Picture 11"
-            ]
-            if right_pics:
-                _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=right_pics[0].name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["snapshot_card"],
+            candidate_names=(pic_name,) if pic_name else (),
+            min_left_emu=5 * 914400,
+            exclude_names={"Picture 11"},
+            slot_label=f"{report_name} slide 1 KPI card",
+        )
 
 
 def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, search_metrics: dict | None = None) -> None:
@@ -1098,6 +1497,12 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
         f"reflecting strong organic discoverability and continued relevance in search results."
     )
     para1_text = _gemini_para(raw_para1) if ctr != "N/A" else ""
+    narrative_values = [
+        exec_texts["para0"],
+        para1_text or exec_texts["para1_no_gsc"],
+        exec_texts["para2"],
+        exec_texts["para3"],
+    ]
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
@@ -1119,6 +1524,9 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             paras = shape.text_frame.paragraphs
             if ctr != "N/A" and len(paras) > 0 and paras[0].text.strip():
                 _fill_text_run(paras[0], ctr)
+            continue
+        if shape.name == "object 8":
+            _fill_paragraph_slots(shape, narrative_values, clear_extra=True)
             continue
 
         for para in shape.text_frame.paragraphs:
@@ -1234,20 +1642,27 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             )):
                 _write_para_with_highlights(para, para4)
 
-    # Replace the snapshot card screenshot — each template uses either Picture 18 or Picture 19
     if "snapshot_card" in screenshots:
-        picture_names = {
-            shape.name
-            for shape in slide.shapes
-            if getattr(shape, "shape_type", None) == 13
-        }
-        for candidate in ("Picture 18", "Picture 19"):
-            if candidate in picture_names:
-                _replace_image_in_slide(slide, screenshots["snapshot_card"], shape_name=candidate)
-                break
+        pic_name = _SLIDE3_SNAPSHOT_CARD_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["snapshot_card"],
+            candidate_names=(pic_name,) if pic_name else ("Picture 18", "Picture 19", "Picture 20"),
+            min_left_emu=4 * 914400,
+            slot_label=f"{report_name} slide 3 snapshot card",
+        )
+    else:
+        logger.warning("[2026] No snapshot_card screenshot available for %s slide 3", report_name)
+
+    narrative_shape_name = _SLIDE3_NARRATIVE_SHAPE.get(report_name, "object 15")
+    narrative_shape = _shape_by_name(slide, narrative_shape_name)
+    if narrative_shape is not None:
+        _fill_paragraph_slots(narrative_shape, [para0, para2, para4], clear_extra=True)
+    else:
+        logger.warning("[2026] Slide 3 narrative shape '%s' not found for %s", narrative_shape_name, report_name)
 
 
-def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
+def _build_slide4(slide, countries_data: list[dict], screenshots: dict, report_name: str = "") -> None:
     """Replace country table screenshot and narrative on Slide 4 (Geographic Performance)."""
     if countries_data:
         sorted_rows = sorted(countries_data, key=lambda r: r["users"], reverse=True)
@@ -1273,30 +1688,26 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict) -> None:
 
             # Narratives: object 6, non-empty paragraphs (even-indexed, odd ones are spacers)
             elif shape.name == "object 6":
-                content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
-                for i, para in enumerate(content_paras):
-                    if i < len(narratives):
-                        _write_para_with_highlights(para, narratives[i], bold_words=country_names)
+                _fill_paragraph_slots(shape, narratives, bold_words=country_names, clear_extra=True)
 
     # Use the captured countries table screenshot from GA4.
     if "countries_table" in screenshots:
-        picture_names = {
-            shape.name
-            for shape in slide.shapes
-            if getattr(shape, "shape_type", None) == 13
-        }
-        for candidate in ("Picture 10", "Picture 9"):
-            if candidate in picture_names:
-                _replace_image_in_slide(slide, screenshots["countries_table"], shape_name=candidate)
-                break
+        pic_name = _SLIDE4_COUNTRIES_TABLE_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["countries_table"],
+            candidate_names=(pic_name,) if pic_name else ("Picture 10", "Picture 9", "Picture 11"),
+            slot_label=f"{report_name} slide 4 countries table",
+        )
 
 
-def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0) -> None:
+def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0, report_name: str = "") -> None:
     """Replace pages table screenshot and narratives on Slide 5 (Page Performance)."""
     if pages_data:
         heading, para1, para2, para3, para4, para5 = _page_perf_paras(pages_data, site_total_views)
         # Collect clean page labels for bolding (classification already ran inside _page_perf_paras)
         page_names = {p.get("_label", p["title"].split(" - ")[0].strip()) for p in pages_data}
+        narrative_shape_name = _SLIDE5_NARRATIVE_SHAPE.get(report_name, "object 7")
 
         for shape in slide.shapes:
             if not shape.has_text_frame:
@@ -1309,30 +1720,24 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
                     _fill_text_run(content_paras[0], heading)
 
             # object 7 — "Overall Insight:" label + up to 5 narrative paragraphs
-            elif shape.name == "object 7":
-                # All paragraphs including spacers; content slots sit at odd indices (1,3,5,7,9)
-                all_paras = shape.text_frame.paragraphs
+            elif shape.name == narrative_shape_name:
                 narratives = [para1, para2, para3, para4, para5]
-                # Odd-indexed paragraphs are the content slots (index 0 is the label)
-                content_slots = [p for i, p in enumerate(all_paras) if i % 2 == 1]
-                for i, para in enumerate(content_slots):
-                    if i < len(narratives):
-                        _write_para_with_highlights(para, narratives[i], bold_words=page_names)
-                    else:
-                        # Clear any leftover text from a previous run in unused slots
-                        for run in para.runs:
-                            run.text = ""
+                _fill_paragraph_slots(
+                    shape,
+                    narratives,
+                    bold_words=page_names,
+                    clear_extra=True,
+                    skip_first=1,
+                )
 
     if "pages_table" in screenshots:
-        picture_names = {
-            shape.name
-            for shape in slide.shapes
-            if getattr(shape, "shape_type", None) == 13
-        }
-        for candidate in ("Picture 11", "Picture 10", "Picture 13"):
-            if candidate in picture_names:
-                _replace_image_in_slide(slide, screenshots["pages_table"], shape_name=candidate)
-                break
+        pic_name = _SLIDE5_PAGES_TABLE_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["pages_table"],
+            candidate_names=(pic_name,) if pic_name else ("Picture 11", "Picture 10", "Picture 13"),
+            slot_label=f"{report_name} slide 5 pages table",
+        )
 
 
 def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
@@ -1384,7 +1789,7 @@ def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
     return tuple(_gemini_paras_batch([subtitle_raw, raw_para0, raw_para1, raw_para2, raw_para3]))
 
 
-def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
+def _build_slide6(slide, search_metrics: dict, screenshots: dict, report_name: str = "") -> None:
     """Replace search performance narrative on Slide 6 (8-slide variants only)."""
     if not search_metrics or all(v == "N/A" for v in search_metrics.values()):
         return
@@ -1403,22 +1808,16 @@ def _build_slide6(slide, search_metrics: dict, screenshots: dict) -> None:
 
         # object 5 — 4 narrative paragraphs (paras 0, 2, 3, 5 — odds are spacers)
         elif shape.name == "object 5":
-            content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
-            for i, para in enumerate(content_paras):
-                narr = [para0, para1, para2, para3][i] if i < 4 else None
-                if narr:
-                    _write_para_with_highlights(para, narr)
+            _fill_paragraph_slots(shape, [para0, para1, para2, para3], clear_extra=True)
 
     if "search_screenshot" in screenshots:
-        picture_names = {
-            shape.name
-            for shape in slide.shapes
-            if getattr(shape, "shape_type", None) == 13
-        }
-        for candidate in ("Picture 10", "Picture 8", "Picture 9", "Picture 20"):
-            if candidate in picture_names:
-                _replace_image_in_slide(slide, screenshots["search_screenshot"], shape_name=candidate)
-                break
+        pic_name = _SLIDE6_SEARCH_CONSOLE_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["search_screenshot"],
+            candidate_names=(pic_name,) if pic_name else ("Picture 10", "Picture 8", "Picture 9", "Picture 20"),
+            slot_label=f"{report_name} slide 6 search console",
+        )
 
 
 def _prev_month_date_range(start_date: str) -> tuple[str, str]:
@@ -1504,6 +1903,7 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.locator("span.view-link-text", has_text="View reports snapshot").click()
     page.wait_for_timeout(3000)
     _ensure_expected_ga4_property(page, report_name)
+    snapshot_url = page.url
     snapshot_date_btn = page.get_by_role("combobox", name="Open date range picker").first
     snapshot_date_btn.wait_for(state="visible", timeout=15000)
     snapshot_date_btn.click()
@@ -1534,6 +1934,19 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
             const href = window.location.href;
             return href.includes(`date00%3D${expectedStart}`) &&
                    href.includes(`date01%3D${expectedEnd}`);
+        }
+        """,
+        arg={"expectedStart": expected_start, "expectedEnd": expected_end},
+        timeout=20000,
+    )
+    page = _restore_snapshot_route_after_date_apply(page, report_name, snapshot_url)
+    page.wait_for_function(
+        """
+        ({ expectedStart, expectedEnd }) => {
+            const href = window.location.href;
+            return href.includes(`date00%3D${expectedStart}`) &&
+                   href.includes(`date01%3D${expectedEnd}`) &&
+                   !href.includes('/reports/start');
         }
         """,
         arg={"expectedStart": expected_start, "expectedEnd": expected_end},
@@ -1700,24 +2113,23 @@ def _capture_ga4_metrics_no_screenshots(context, report_name: str, start_date: s
         pass
 
     _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+    snapshot_dashboard_url = page.url
     snapshot_metrics = _scrape_snapshot_metrics(page)
+    summary_metrics = _scrape_snapshot_summary_metrics(page)
 
     try:
-        page.get_by_text("View countries").click()
+        page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "countries")
         page.wait_for_timeout(4000)
-        _ensure_expected_ga4_property(page, report_name)
         page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
         countries_data = _scrape_countries_table(page)
-        page.go_back()
-        page.wait_for_timeout(3000)
-        _ensure_expected_ga4_property(page, report_name)
+        page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
     except Exception as e:
         logger.warning("[2026] Previous-period countries scrape failed: %s", e)
 
     try:
-        page.get_by_role("button", name="View pages and screens", exact=True).click()
+        page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+        page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
         page.wait_for_timeout(4000)
-        _ensure_expected_ga4_property(page, report_name)
         page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
         page_views, pages_data, site_total_views = _scrape_pages_table(page)
     except Exception as e:
@@ -1727,6 +2139,7 @@ def _capture_ga4_metrics_no_screenshots(context, report_name: str, start_date: s
         page = _goto_ga4_section(page, report_name, "/home")
         page.wait_for_timeout(2000)
         home_metrics = _scrape_home_metrics(page)
+        home_metrics = _backfill_missing_home_metrics(home_metrics, summary_metrics)
     except Exception as e:
         logger.warning("[2026] Previous-period home metrics scrape failed: %s", e)
 
@@ -1750,8 +2163,8 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
             _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
-            page.get_by_role("button", name="View pages and screens", exact=True).click()
-            page.wait_for_timeout(4000)
+            snapshot_dashboard_url = page.url
+            page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
         else:
             page = context.new_page()
             page.bring_to_front()
@@ -1759,7 +2172,8 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
             _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
-            page.get_by_role("button", name="View pages and screens", exact=True).click()
+            snapshot_dashboard_url = page.url
+            page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
 
         page.wait_for_timeout(4000)
         _ensure_expected_ga4_property(page, report_name)
@@ -2167,7 +2581,7 @@ def _generate_recommendations_2026(
 ) -> list[dict]:
     """Use Gemini to generate 3 structured recommendations, each with a title + 3 bullet points."""
     load_runtime_environment()
-    brand = report_name.replace("_", " ").title()
+    brand = _report_display_name(report_name)
 
     top_pages = ", ".join(
         f"{p.get('_label', p['title'].split(' - ')[0])} ({p['views']:,} views, {p['views_per_user']} views/user)"
@@ -2362,7 +2776,7 @@ def _generate_recommendations_2026(
     return recs
 
 
-def _build_recommendations_slide(slide) -> None:
+def _build_recommendations_slide(slide, report_name: str = "") -> None:
     """Write placeholder text on the recommendations slide for manual completion."""
     placeholders = [
         ("Recommendation 1", [
@@ -2382,6 +2796,8 @@ def _build_recommendations_slide(slide) -> None:
         ]),
     ]
 
+    recommendation_shape_name = _RECOMMENDATIONS_TEXT_SHAPE.get(report_name, "object 7")
+
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
@@ -2391,8 +2807,11 @@ def _build_recommendations_slide(slide) -> None:
             if content_paras:
                 _fill_text_run(content_paras[0], "Three Key Initiatives to Enhance Performance")
 
-        elif shape.name == "object 7":
+        elif shape.name == recommendation_shape_name:
             paras = shape.text_frame.paragraphs
+            para_offset = 1 if recommendation_shape_name == "object 4" else 0
+            if para_offset and paras:
+                _fill_text_run(paras[0], "Three Key Initiatives to Enhance Performance")
             layout = [
                 (0,  0, "title"),
                 (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
@@ -2404,6 +2823,7 @@ def _build_recommendations_slide(slide) -> None:
                 (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
             ]
             for para_idx, rec_idx, role in layout:
+                para_idx += para_offset
                 if para_idx >= len(paras) or rec_idx >= len(placeholders):
                     continue
                 title, bullets = placeholders[rec_idx]
@@ -2416,6 +2836,9 @@ def _build_recommendations_slide(slide) -> None:
                         _fill_text_run(para, bullets[bullet_n])
                     else:
                         _fill_text_run(para, "")
+            for para in paras[para_offset + len(layout):]:
+                if para.text.strip():
+                    _fill_text_run(para, "")
 
 
 # ---------------------------------------------------------------------------
@@ -2462,17 +2885,17 @@ def generate_report_2026(
     _stage("Building slide 3 up to complete...")
     _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
     _stage("Building slide 4 up to complete...")
-    _build_slide4(prs.slides[3], countries_data, screenshots)
+    _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
     _stage("Building slide 5 up to complete...")
-    _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views)
+    _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name)
 
     if not is_7_slide and slide_count >= 8:
         _stage("Building slide 6 up to complete...")
-        _build_slide6(prs.slides[5], search_metrics, screenshots)
+        _build_slide6(prs.slides[5], search_metrics, screenshots, report_name=report_name)
 
     rec_slide_idx = slide_count - 2
     _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-    _build_recommendations_slide(prs.slides[rec_slide_idx])
+    _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name)
 
     # Step 4: Save
     safe_name = report_name.replace("_", "-")
