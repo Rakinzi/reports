@@ -13,6 +13,18 @@ export type Report = {
 	created_at: string;
 };
 
+export type QuickReportRequest = {
+	ga4_property_id: string;
+	client_name: string;
+	gsc_url: string;
+	date_range: string;
+	report_date: string;
+	start_date: string;
+	end_date: string;
+	slide1_logo_data_url: string;
+	slide1_logo_filename: string;
+};
+
 export type ChromeProfile = {
 	profile_dir: string;
 	profile_name: string;
@@ -320,5 +332,16 @@ export async function uploadSlideImage(
 		method: 'POST',
 		headers: { 'Content-Type': 'application/octet-stream' },
 		body: pngBlob,
+	});
+}
+
+export async function generateQuickReport(
+	apiBaseUrl: string,
+	body: QuickReportRequest
+): Promise<{ id: number; status: string }> {
+	return fetchJson<{ id: number; status: string }>(apiBaseUrl, '/reports/generate-quick', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		body: JSON.stringify(body)
 	});
 }
