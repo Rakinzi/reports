@@ -43,7 +43,7 @@
 		TableHeader,
 		TableRow
 	} from '$lib/components/ui/table';
-	import { fetchJson, fetchReportOptions, resolveBackendContext, type Report, type ReportOption, type SettingsState, waitForBackend } from '$lib/backend';
+	import { fetchJson, fetchReportOptions, generateQuickReport, resolveBackendContext, type Report, type ReportOption, type SettingsState, waitForBackend } from '$lib/backend';
 	import { saveReportFromDesktop } from '$lib/desktop';
 
 	const FALLBACK_REPORT_OPTIONS: ReportOption[] = [
@@ -95,6 +95,18 @@
 	let slide1LogoDataUrl = $state('');
 	let slide1LogoFileName = $state('');
 
+	let quickOpen = $state(false);
+	let quickGenerating = $state(false);
+	let quickError = $state('');
+	let quickPropertyId = $state('');
+	let quickClientName = $state('');
+	let quickGscUrl = $state('');
+	let quickStartDateRaw = $state('');
+	let quickEndDateRaw = $state('');
+	let quickReportDateRaw = $state('');
+	let quickLogoDataUrl = $state('');
+	let quickLogoFileName = $state('');
+
 	function toGA4Date(raw: string): string {
 		if (!raw) return '';
 		const d = new Date(raw + 'T00:00:00');
@@ -141,6 +153,69 @@
 		if (startDateRaw > endDateRaw) return 'Start date must be before end date.';
 		return '';
 	})());
+
+	const quickDateRange = $derived(
+		quickStartDateRaw && quickEndDateRaw
+			? `${toLongDate(quickStartDateRaw)} - ${toLongDate(quickEndDateRaw)}`
+			: ''
+	);
+	const quickStartDate = $derived(toGA4Date(quickStartDateRaw));
+	const quickEndDate = $derived(toGA4Date(quickEndDateRaw));
+	const quickReportDate = $derived(toReportDate(quickReportDateRaw));
+
+	const quickDateValidationError = $derived((() => {
+		if (!quickStartDateRaw || !quickEndDateRaw) return '';
+		if (quickStartDateRaw > today) return 'Start date cannot be in the future.';
+		if (quickEndDateRaw > today) return 'End date cannot be in the future.';
+		if (quickStartDateRaw > quickEndDateRaw) return 'Start date must be before end date.';
+		return '';
+	})());
+
+	function handleQuickLogoChange(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		quickLogoDataUrl = '';
+		quickLogoFileName = '';
+		if (!file) return;
+
+		const reader = new FileReader();
+		reader.onload = () => {
+			quickLogoDataUrl = typeof reader.result === 'string' ? reader.result : '';
+			quickLogoFileName = file.name;
+		};
+		reader.onerror = () => {
+			quickError = 'Could not read the selected logo file.';
+		};
+		reader.readAsDataURL(file);
+	}
+
+	async function handleQuickGenerate(event: SubmitEvent) {
+		event.preventDefault();
+		if (quickDateValidationError) return;
+		quickGenerating = true;
+		quickError = '';
+
+		try {
+			const res = await generateQuickReport(apiBaseUrl, {
+				ga4_property_id: quickPropertyId.trim(),
+				client_name: quickClientName.trim(),
+				gsc_url: quickGscUrl.trim(),
+				date_range: quickDateRange,
+				report_date: quickReportDate,
+				start_date: quickStartDate,
+				end_date: quickEndDate,
+				slide1_logo_data_url: quickLogoDataUrl,
+				slide1_logo_filename: quickLogoFileName
+			});
+			quickOpen = false;
+			await refreshReports();
+			pollReport(res.id);
+		} catch (error) {
+			quickError = error instanceof Error ? error.message : 'Generation failed.';
+		} finally {
+			quickGenerating = false;
+		}
+	}
 
 	const stats = $derived({
 		total: reports.length,
@@ -392,6 +467,15 @@
 			>
 				<Plus class="mr-2 h-4 w-4" />
 				Generate Report
+			</Button>
+			<Button
+				size="sm"
+				variant="outline"
+				onclick={() => (quickOpen = true)}
+				disabled={!settings.configured || booting || !backendReady}
+			>
+				<Plus class="mr-2 h-4 w-4" />
+				Quick Report
 			</Button>
 		</div>
 	</div>
@@ -740,5 +824,138 @@
 			<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
 			<Button variant="destructive" onclick={() => void confirmDelete()}>Delete</Button>
 		</DialogFooter>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={quickOpen}>
+	<DialogContent class="sm:max-w-md">
+		<DialogHeader>
+			<DialogTitle>Quick Report</DialogTitle>
+			<DialogDescription>
+				Generate a report for any GA4 property — no template upload required.
+			</DialogDescription>
+		</DialogHeader>
+
+		<form onsubmit={handleQuickGenerate} class="space-y-4 pt-2">
+			{#if quickError}
+				<div class="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400">
+					{quickError}
+				</div>
+			{/if}
+
+			<div class="space-y-2">
+				<Label>GA4 Property ID</Label>
+				<input
+					type="text"
+					bind:value={quickPropertyId}
+					required
+					placeholder="e.g. 523115644"
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+				/>
+			</div>
+
+			<div class="space-y-2">
+				<Label>Client Name</Label>
+				<input
+					type="text"
+					bind:value={quickClientName}
+					required
+					placeholder="e.g. Union Hardware"
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+				/>
+			</div>
+
+			<div class="space-y-2">
+				<Label>GSC Site URL (optional)</Label>
+				<input
+					type="text"
+					bind:value={quickGscUrl}
+					placeholder="https://example.com/"
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+				/>
+				<p class="text-xs text-muted-foreground">Leave blank to skip the Search Performance slide.</p>
+			</div>
+
+			<div class="grid grid-cols-2 gap-3">
+				<div class="space-y-2">
+					<Label>Start Date</Label>
+					<input
+						type="date"
+						bind:value={quickStartDateRaw}
+						required
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
+					/>
+				</div>
+				<div class="space-y-2">
+					<Label>End Date</Label>
+					<input
+						type="date"
+						bind:value={quickEndDateRaw}
+						required
+						class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
+					/>
+				</div>
+			</div>
+
+			{#if quickDateValidationError}
+				<div class="date-error-toast" role="alert" aria-live="assertive">
+					<span class="date-error-bar"></span>
+					<svg class="date-error-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+						<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+					</svg>
+					<span class="date-error-text">{quickDateValidationError}</span>
+				</div>
+			{:else if quickDateRange}
+				<p class="text-xs text-muted-foreground">Date range: <span class="text-foreground/70">{quickDateRange}</span></p>
+			{/if}
+
+			<div class="space-y-2">
+				<Label>Report Date</Label>
+				<input
+					type="date"
+					bind:value={quickReportDateRaw}
+					required
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring [color-scheme:light] dark:[color-scheme:dark]"
+				/>
+				{#if quickReportDate}
+					<p class="text-xs text-muted-foreground">Formatted: <span class="text-foreground/70">{quickReportDate}</span></p>
+				{/if}
+			</div>
+
+			<div class="space-y-1">
+				<Label>Logo (optional)</Label>
+				<input
+					type="file"
+					accept="image/png,image/jpeg,image/jpg,image/gif,image/bmp,image/tiff"
+					onchange={handleQuickLogoChange}
+					class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground file:mr-3 file:rounded file:border-0 file:bg-muted file:px-2 file:py-1 file:text-xs file:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+				/>
+				{#if quickLogoFileName}
+					<p class="text-xs text-muted-foreground">{quickLogoFileName}</p>
+				{/if}
+			</div>
+
+			<div class="flex justify-end gap-3 pt-2">
+				<Button
+					type="button"
+					variant="outline"
+					onclick={() => (quickOpen = false)}
+					disabled={quickGenerating}
+				>
+					Cancel
+				</Button>
+				<Button
+					type="submit"
+					disabled={quickGenerating || !!quickDateValidationError}
+				>
+					{#if quickGenerating}
+						<span class="mr-2 inline-flex"><SpinnerArc size={16} stroke={2} color="currentColor" /></span>
+						Generating...
+					{:else}
+						Generate
+					{/if}
+				</Button>
+			</div>
+		</form>
 	</DialogContent>
 </Dialog>
