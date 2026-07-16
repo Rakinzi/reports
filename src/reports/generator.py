@@ -29,6 +29,7 @@ from .charts import (
 )
 from .logging_utils import configure_logging
 from .runtime import (
+    get_app_data_dir,
     get_managed_chrome_profile_directory,
     get_managed_chrome_user_data_dir,
     get_output_dir,
@@ -42,6 +43,23 @@ TEMPLATES_DIR = get_templates_dir()
 OUTPUT_DIR = get_output_dir()
 SCREENSHOTS_DIR = get_screenshots_dir()
 logger = configure_logging()
+
+
+def _dump_failure_diagnostics(page, label: str) -> None:
+    """Best-effort screenshot + HTML dump for post-mortem debugging of flaky GA4 UI steps."""
+    import time
+
+    debug_dir = get_app_data_dir() / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    try:
+        page.screenshot(path=str(debug_dir / f"{label}-{stamp}.png"), full_page=True)
+    except Exception:
+        logger.warning("Failed to capture diagnostic screenshot for %s", label)
+    try:
+        (debug_dir / f"{label}-{stamp}.html").write_text(page.content())
+    except Exception:
+        logger.warning("Failed to capture diagnostic HTML for %s", label)
 
 GA4_PROPERTIES = {
     "cancer_serve": "454873082",
@@ -154,7 +172,23 @@ def _open_analytics_root(page) -> None:
         page.goto("https://analytics.google.com/analytics/web/", wait_until="domcontentloaded", timeout=30000)
     except Exception:
         page.goto("https://analytics.google.com/analytics/web/", wait_until="load", timeout=45000)
-    # Wait for the search bar to actually appear instead of a fixed sleep
+
+    # Dismiss any overlays (Insights panel, guided tours, modals) that block the search bar.
+    for dismiss_sel in [
+        "button[aria-label='Close']",
+        "button[aria-label='Dismiss']",
+        "[data-guidedhelpid='agi-dismiss-button']",
+        "gds-guide-button[dismiss]",
+    ]:
+        try:
+            btn = page.locator(dismiss_sel).first
+            if btn.is_visible(timeout=1000):
+                btn.click()
+                page.wait_for_timeout(400)
+        except Exception:
+            continue
+
+    # Wait for the search bar to actually appear instead of a fixed sleep.
     for sel in [
         lambda: page.get_by_role("searchbox").first,
         lambda: page.get_by_role("textbox", name=re.compile("search", re.I)).first,
@@ -165,7 +199,36 @@ def _open_analytics_root(page) -> None:
             return
         except Exception:
             continue
-    # fallback — give GA4 more time if nothing found yet
+
+    # GA4 sometimes hides the search input behind a search icon button — click it to reveal.
+    for trigger_sel in [
+        "button[aria-label='Search']",
+        "button[aria-label*='search' i]",
+        "[data-guidedhelpid='search-bar'] button",
+        "mat-icon:has-text('search')",
+    ]:
+        try:
+            btn = page.locator(trigger_sel).first
+            if btn.is_visible(timeout=2000):
+                btn.click()
+                page.wait_for_timeout(1000)
+                break
+        except Exception:
+            continue
+
+    # One more pass after potentially clicking the trigger.
+    for sel in [
+        lambda: page.get_by_role("searchbox").first,
+        lambda: page.get_by_role("textbox", name=re.compile("search", re.I)).first,
+        lambda: page.locator('input[aria-label*="Search"], input[placeholder*="Search"]').first,
+    ]:
+        try:
+            sel().wait_for(state="visible", timeout=5000)
+            return
+        except Exception:
+            continue
+
+    # Last resort: extra wait
     page.wait_for_timeout(5000)
 
 
@@ -217,22 +280,29 @@ def _switch_ga4_property_via_search(page, property_key: str):
     property_id = GA4_PROPERTIES[property_key]
     logger.info("Switching GA4 property via search. property_key=%s property_id=%s", property_key, property_id)
 
-    _open_analytics_root(page)
-
     search_input = None
     search_selectors = [
         lambda: page.get_by_role("searchbox").first,
         lambda: page.get_by_role("textbox", name=re.compile("search", re.I)).first,
         lambda: page.locator('input[aria-label*="Search"], input[placeholder*="Search"]').first,
     ]
-    for resolve in search_selectors:
-        try:
-            candidate = resolve()
-            candidate.wait_for(state="visible", timeout=4000)
-            search_input = candidate
+
+    for attempt in range(1, 3):
+        _open_analytics_root(page)
+        for resolve in search_selectors:
+            try:
+                candidate = resolve()
+                candidate.wait_for(state="visible", timeout=4000)
+                search_input = candidate
+                break
+            except Exception:
+                continue
+        if search_input is not None:
             break
-        except Exception:
-            continue
+        logger.warning(
+            "GA4 search bar not found after open_analytics_root attempt=%s, retrying...", attempt
+        )
+        page.wait_for_timeout(3000)
 
     if search_input is None:
         raise RuntimeError("Could not find the GA4 search bar to switch properties.")
@@ -326,7 +396,9 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
             if expected_token not in page.url:
                 page = _switch_ga4_property_via_search(page, property_key)
             page = _leave_ga4_start_page(page, property_key, section_fragment)
-            url = _ga4_navigation_url(page, property_key, section_fragment)
+            # Always use the canonical p<id> URL — avoids carrying over a stale
+            # a<account_id> prefix from whichever property the browser drifted to.
+            url = _ga4_url(property_key, section_fragment)
             logger.info(
                 "Navigating to GA4 property=%s section=%s attempt=%s url=%s",
                 GA4_PROPERTIES[property_key],
@@ -359,6 +431,19 @@ def _goto_ga4_section(page, property_key: str, section_fragment: str, timeout: i
                 page.url,
                 exc,
             )
+            # Close any extra tabs opened by _resolve_post_click_page during this
+            # attempt — leaving zombie tabs causes GA4 to keep redirecting back to
+            # whatever property those tabs are on.
+            try:
+                all_pages = page.context.pages
+                for extra in all_pages:
+                    if extra is not page:
+                        try:
+                            extra.close()
+                        except Exception:
+                            pass
+            except Exception:
+                pass
             try:
                 page.goto("https://analytics.google.com/analytics/web/", wait_until="domcontentloaded", timeout=20000)
                 page.wait_for_timeout(2000)
@@ -432,21 +517,44 @@ def _set_date_range(page, start: str, end: str) -> None:
     page.wait_for_timeout(1000)
     page.get_by_role("menuitem").filter(has_text="Custom").click()
     page.wait_for_timeout(1000)
-    start_input = page.get_by_label("Start date")
-    start_input.wait_for(state="visible", timeout=10000)
-    start_input.click()
-    start_input.select_text()
-    start_input.fill(start)
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(500)
-    end_input = page.get_by_label("End date")
-    end_input.click()
-    end_input.select_text()
-    end_input.fill(end)
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(500)
-    page.get_by_role("button", name="Apply").click()
-    page.wait_for_timeout(3000)
+
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            start_input = page.get_by_label("Start date")
+            start_input.wait_for(state="visible", timeout=10000)
+            start_input.click()
+            start_input.select_text()
+            start_input.press_sequentially(start, delay=50)
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(500)
+            end_input = page.get_by_label("End date")
+            end_input.click()
+            end_input.select_text()
+            end_input.press_sequentially(end, delay=50)
+            page.keyboard.press("Tab")
+            page.wait_for_timeout(500)
+
+            actual_start = start_input.input_value()
+            actual_end = end_input.input_value()
+            if actual_start != start or actual_end != end:
+                raise RuntimeError(
+                    f"Date inputs did not take the requested values "
+                    f"(expected {start!r}/{end!r}, got {actual_start!r}/{actual_end!r})"
+                )
+
+            page.get_by_role("button", name="Apply").click(timeout=10000)
+            page.wait_for_timeout(3000)
+            return
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "_set_date_range: attempt=%s failed, retrying. error=%s", attempt, exc
+            )
+            page.wait_for_timeout(1500)
+
+    _dump_failure_diagnostics(page, "set_date_range_apply_failed")
+    raise RuntimeError("Could not apply the GA4 custom date range after retries.") from last_error
 
 
 def _extract_metric_value(text: str, label: str) -> str | None:
@@ -1088,9 +1196,21 @@ MONTH_YEAR_PATTERN = re.compile(r"\b(January|February|March|April|May|June|July|
 
 
 def _performance_month(date_range: str) -> str:
-    """Extract 'Month YYYY' from a date range string e.g. '1 February 2026 - 28 February 2026' -> 'February 2026'"""
-    match = MONTH_YEAR_PATTERN.search(date_range)
-    return match.group(0) if match else ""
+    """Extract a human-readable period label from a date range string.
+    - Same month: '1 February 2026 - 28 February 2026' -> 'February 2026'
+    - Different months, same year: '1 April 2026 - 30 June 2026' -> 'April - June 2026'
+    - Different years: '1 December 2025 - 31 January 2026' -> 'December 2025 - January 2026'
+    """
+    matches = MONTH_YEAR_PATTERN.findall(date_range)
+    if not matches:
+        return ""
+    if len(matches) == 1 or matches[0] == matches[1]:
+        return matches[0]
+    start_month, start_year = matches[0].split()
+    end_month, end_year = matches[1].split()
+    if start_year == end_year:
+        return f"{start_month} - {end_month} {end_year}"
+    return f"{matches[0]} - {matches[1]}"
 
 
 def _replace_text_in_slide(slide, replacements: dict[str, str], report_date: str, performance_month: str) -> None:

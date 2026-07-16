@@ -12,7 +12,9 @@
 		RefreshCw,
 		Settings,
 		Square,
-		Trash2
+		Trash2,
+		ChevronLeft,
+		ChevronRight
 	} from '@lucide/svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card';
@@ -28,6 +30,7 @@
 		Dialog,
 		DialogContent,
 		DialogDescription,
+		DialogFooter,
 		DialogHeader,
 		DialogTitle
 	} from '$lib/components/ui/dialog';
@@ -272,7 +275,31 @@
 		}
 	}
 
-	async function deleteReport(id: number) {
+	const PAGE_SIZE = 10;
+	let currentPage = $state(1);
+	const totalPages = $derived(Math.max(1, Math.ceil(reports.length / PAGE_SIZE)));
+	const pagedReports = $derived(reports.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE));
+
+	$effect(() => {
+		// Reset to page 1 whenever the report list changes length (delete / new report)
+		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+		reports.length;
+		currentPage = 1;
+	});
+
+	let deleteOpen = $state(false);
+	let deleteTargetId = $state<number | null>(null);
+
+	function promptDelete(id: number) {
+		deleteTargetId = id;
+		deleteOpen = true;
+	}
+
+	async function confirmDelete() {
+		if (deleteTargetId === null) return;
+		const id = deleteTargetId;
+		deleteOpen = false;
+		deleteTargetId = null;
 		try {
 			await fetchJson(apiBaseUrl, `/reports/${id}`, { method: 'DELETE' });
 			await refreshReports();
@@ -441,7 +468,7 @@
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{#each reports as report (report.id)}
+								{#each pagedReports as report (report.id)}
 									<TableRow class="border-border">
 										<TableCell class="font-medium text-foreground">
 											{reportOptions.find((r) => r.value === report.report_name)?.label ?? report.report_name}
@@ -480,7 +507,7 @@
 														size="sm"
 														variant="ghost"
 														class="text-destructive hover:bg-destructive/10 hover:text-destructive"
-														onclick={() => void deleteReport(report.id)}
+														onclick={() => promptDelete(report.id)}
 														title="Delete report"
 													>
 														<Trash2 class="h-3.5 w-3.5" />
@@ -524,7 +551,7 @@
 														size="sm"
 														variant="ghost"
 														class="text-destructive hover:bg-destructive/10 hover:text-destructive"
-														onclick={() => void deleteReport(report.id)}
+														onclick={() => promptDelete(report.id)}
 														title="Delete report"
 													>
 														<Trash2 class="h-3.5 w-3.5" />
@@ -536,6 +563,33 @@
 								{/each}
 							</TableBody>
 						</Table>
+						{#if totalPages > 1}
+							<div class="flex items-center justify-between border-t border-border px-4 py-3">
+								<p class="text-xs text-muted-foreground">
+									Page {currentPage} of {totalPages} &middot; {reports.length} reports
+								</p>
+								<div class="flex items-center gap-1">
+									<Button
+										size="sm"
+										variant="ghost"
+										class="h-7 w-7 p-0"
+										disabled={currentPage === 1}
+										onclick={() => (currentPage -= 1)}
+									>
+										<ChevronLeft class="h-4 w-4" />
+									</Button>
+									<Button
+										size="sm"
+										variant="ghost"
+										class="h-7 w-7 p-0"
+										disabled={currentPage === totalPages}
+										onclick={() => (currentPage += 1)}
+									>
+										<ChevronRight class="h-4 w-4" />
+									</Button>
+								</div>
+							</div>
+						{/if}
 					{/if}
 				</CardContent>
 			</Card>
@@ -673,5 +727,18 @@
 				</Button>
 			</div>
 		</form>
+	</DialogContent>
+</Dialog>
+
+<Dialog bind:open={deleteOpen}>
+	<DialogContent class="sm:max-w-sm">
+		<DialogHeader>
+			<DialogTitle>Delete report?</DialogTitle>
+			<DialogDescription>This cannot be undone.</DialogDescription>
+		</DialogHeader>
+		<DialogFooter>
+			<Button variant="outline" onclick={() => (deleteOpen = false)}>Cancel</Button>
+			<Button variant="destructive" onclick={() => void confirmDelete()}>Delete</Button>
+		</DialogFooter>
 	</DialogContent>
 </Dialog>

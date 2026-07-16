@@ -92,7 +92,7 @@ SEVEN_SLIDE_REPORTS = {"zimplats", "dicomm"}
 GSC_URLS: dict[str, str] = {
     "econet":       "https://www.econet.co.zw/",
     "econet_ai":    "https://econetai.co.zw/",
-    "infraco":      "https://infraco.co.zw/",
+    "infraco":      "https://econetinfraco.co.zw/",
     "ecocash":      "https://www.ecocash.co.zw/",
     "ecosure":      "https://ecosure.co.zw/",
     "cancer_serve": "https://www.cancerserve.org/",
@@ -1115,6 +1115,13 @@ def _capture_snapshot_card(page, out_dir: Path, screenshots: dict[str, Path]) ->
     """Capture the dated reporting-hub summary card before any drilldown navigation."""
     card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
     card_el.wait_for(state="visible", timeout=20000)
+    # Wait for the chart SVG inside the card to finish rendering data.
+    # GA4 renders chart data lazily — the card is visible before the line/bar data loads.
+    try:
+        card_el.locator("svg path[d]").first.wait_for(state="visible", timeout=15000)
+        page.wait_for_timeout(3000)
+    except Exception:
+        page.wait_for_timeout(5000)
     _dismiss_playwright_overlays(page)
     path = out_dir / "snapshot_card.png"
     card_el.screenshot(path=str(path))
@@ -1174,6 +1181,15 @@ def capture_2026(
             try:
                 chart_el = page.locator("ga-card.card_0 ga-tab-chart")
                 chart_el.wait_for(state="visible", timeout=10000)
+                # Ensure the "Active users" tab is selected (GA4 remembers the last active tab).
+                try:
+                    active_tab = chart_el.locator("button, [role='tab']").filter(has_text="Active users").first
+                    if active_tab.count() > 0:
+                        active_tab.wait_for(state="visible", timeout=3000)
+                        active_tab.click()
+                        page.wait_for_timeout(1500)
+                except Exception:
+                    pass
                 _dismiss_playwright_overlays(page)
                 path = out_dir / "home_chart.png"
                 chart_el.screenshot(path=str(path))
@@ -1306,9 +1322,21 @@ def capture_2026(
 # ---------------------------------------------------------------------------
 
 def _performance_month(date_range: str) -> str:
-    """Extract 'Month,YYYY' from date_range e.g. '1 February 2026 - 28 February 2026' -> 'February,2026'"""
-    match = re.search(r"[A-Za-z]+ \d{4}", date_range)
-    return match.group(0).replace(" ", ",") if match else ""
+    """Extract a period label from date_range, comma-separating month and year.
+    - Same month: '1 February 2026 - 28 February 2026' -> 'February,2026'
+    - Multi-month, same year: '1 April 2026 - 30 June 2026' -> 'April - June,2026'
+    - Cross-year: '1 December 2025 - 31 January 2026' -> 'December,2025 - January,2026'
+    """
+    matches = re.findall(r"[A-Za-z]+ \d{4}", date_range)
+    if not matches:
+        return ""
+    if len(matches) == 1 or matches[0] == matches[1]:
+        return matches[0].replace(" ", ",")
+    start_parts = matches[0].split()
+    end_parts = matches[1].split()
+    if start_parts[1] == end_parts[1]:
+        return f"{start_parts[0]} - {end_parts[0]},{end_parts[1]}"
+    return f"{matches[0].replace(' ', ',')} - {matches[1].replace(' ', ',')}"
 
 
 def _replace_picture_with_fallback(
