@@ -2931,3 +2931,75 @@ def generate_report_2026(
     prs.save(str(output_path))
     logger.info("[2026] Saved report to %s", output_path)
     return output_path
+
+
+def generate_quick_report(
+    report_name: str,
+    client_name: str,
+    ga4_property_id: str,
+    gsc_url: str,
+    date_range: str,
+    report_date: str,
+    start_date: str,
+    end_date: str,
+    _stage_callback=None,
+) -> Path:
+    """Ad-hoc report for any GA4 property, using the shared Delta-based template.
+
+    Temporarily registers report_name -> ga4_property_id (and optionally -> gsc_url)
+    into the same module-level dicts the rest of the 2026 pipeline already reads from,
+    so capture_2026() and its helpers work completely unmodified.
+    """
+    from .generator import GA4_PROPERTIES
+
+    def _stage(msg: str):
+        if _stage_callback:
+            _stage_callback(msg)
+        logger.info("[2026][quick] Stage: %s", msg)
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    GA4_PROPERTIES[report_name] = ga4_property_id
+    if gsc_url:
+        GSC_URLS[report_name] = gsc_url
+    try:
+        screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics = capture_2026(
+            report_name, start_date, end_date, _stage_callback=_stage_callback
+        )
+
+        template_path = TEMPLATES_DIR / TEMPLATES_2026["delta"]
+        prs = Presentation(str(template_path))
+        slide_count = len(prs.slides)
+        is_7_slide = not gsc_url
+
+        perf_month = _performance_month(date_range)
+
+        logger.info("[2026][quick] Building slides for %s (%d slides)", report_name, slide_count)
+
+        _stage("Building slide 1 up to complete...")
+        _build_slide1(prs.slides[0], perf_month, screenshots, report_name=report_name)
+        _stage("Building slide 2 up to complete...")
+        _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
+        _stage("Building slide 3 up to complete...")
+        _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
+        _stage("Building slide 4 up to complete...")
+        _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
+        _stage("Building slide 5 up to complete...")
+        _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name)
+
+        if not is_7_slide and slide_count >= 8:
+            _stage("Building slide 6 up to complete...")
+            _build_slide6(prs.slides[5], search_metrics, screenshots, report_name=report_name)
+
+        rec_slide_idx = slide_count - 2
+        _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
+        _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name)
+
+        safe_name = report_name.replace("_", "-")
+        output_path = OUTPUT_DIR / f"{safe_name}-{report_date.replace(' ', '-')}.pptx"
+        prs.save(str(output_path))
+        logger.info("[2026][quick] Saved report to %s", output_path)
+        return output_path
+    finally:
+        GA4_PROPERTIES.pop(report_name, None)
+        GSC_URLS.pop(report_name, None)
