@@ -25,7 +25,8 @@ from .db import (
 )
 from .logging_utils import configure_logging, get_log_path, read_recent_logs, stream_logs
 from .runtime import get_app_data_dir, get_runtime_status, load_runtime_environment, save_settings, get_user_templates_dir
-from .schemas import AppSettingsUpdate, GenerateReportRequest, HARDCODED_REPORT_NAMES
+from .schemas import AppSettingsUpdate, GenerateReportRequest, GenerateQuickReportRequest, HARDCODED_REPORT_NAMES
+from .slugify import slugify_client_name
 
 _executor = ThreadPoolExecutor(max_workers=1)
 logger = configure_logging()
@@ -176,6 +177,56 @@ def _run_generate(
     finally:
         _cancel_flags.pop(report_id, None)
 
+
+def _run_generate_quick(report_id: int, report_name: str, body: "GenerateQuickReportRequest"):
+    cancel_flag = _cancel_flags.get(report_id)
+
+    def stage_callback(stage: str) -> None:
+        if cancel_flag and cancel_flag.is_set():
+            raise InterruptedError("Report generation cancelled by user.")
+        update_report_stage(report_id, stage)
+
+    try:
+        from .generator_2026 import generate_quick_report
+
+        logger.info("Starting quick report generation for report_id=%s report_name=%s", report_id, report_name)
+        update_report_stage(report_id, "Capturing GA4 data...")
+        output_path = generate_quick_report(
+            report_name=report_name,
+            client_name=body.client_name,
+            ga4_property_id=body.ga4_property_id,
+            gsc_url=body.gsc_url,
+            date_range=body.date_range,
+            report_date=body.report_date,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            _stage_callback=stage_callback,
+        )
+
+        logo_path = _write_logo_override(report_id, body.slide1_logo_data_url, body.slide1_logo_filename)
+        update_report_stage(report_id, "Applying slide 1 branding...")
+        _apply_slide1_overrides(
+            Path(output_path),
+            report_name=report_name,
+            slide1_source_name="Delta",
+            slide1_name=body.client_name,
+            logo_path=logo_path,
+        )
+
+        update_report_stage(report_id, "Finalising report...")
+        update_report_completed(report_id, str(output_path))
+        logger.info("Completed quick report generation for report_id=%s output_path=%s", report_id, output_path)
+        update_report_slides_dir(report_id, "")
+    except InterruptedError as e:
+        update_report_failed(report_id, str(e))
+        logger.info("Quick report generation cancelled for report_id=%s", report_id)
+    except Exception as e:
+        update_report_failed(report_id, str(e))
+        logger.exception("Quick report generation failed for report_id=%s", report_id)
+    finally:
+        _cancel_flags.pop(report_id, None)
+
+
 app = FastAPI(title="Reports API")
 
 app.add_middleware(
@@ -294,6 +345,24 @@ def post_generate_report(body: GenerateReportRequest):
         body.slide1_logo_data_url,
         body.slide1_logo_filename,
     )
+    return JSONResponse({"id": report_id, "status": "pending"}, status_code=202)
+
+
+@app.post("/reports/generate-quick", status_code=202)
+def post_generate_quick_report(body: GenerateQuickReportRequest):
+    status = get_runtime_status()
+    if not status["gemini_api_key_set"]:
+        raise HTTPException(status_code=400, detail="Gemini API key is not configured")
+    if not status["browser_available"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No compatible browser installation was found. Install Google Chrome, Microsoft Edge, or Chromium.",
+        )
+
+    slug = slugify_client_name(body.client_name)
+    report_id = create_report(slug, body.date_range, body.report_date)
+    _cancel_flags[report_id] = threading.Event()
+    _executor.submit(_run_generate_quick, report_id, slug, body)
     return JSONResponse({"id": report_id, "status": "pending"}, status_code=202)
 
 
