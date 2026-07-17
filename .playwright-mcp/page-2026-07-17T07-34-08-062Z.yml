@@ -1,0 +1,29 @@
+- generic [ref=f1e3]:
+  - complementary [ref=f1e4]:
+    - generic [ref=f1e5]: Reports
+    - navigation [ref=f1e11]:
+      - paragraph [ref=f1e12]: Navigation
+      - link "Dashboard" [ref=f1e13] [cursor=pointer]:
+        - /url: /
+      - link "Settings" [ref=f1e21] [cursor=pointer]:
+        - /url: /settings
+      - link "Logs" [ref=f1e25] [cursor=pointer]:
+        - /url: /logs
+      - link "Templates" [ref=f1e29] [cursor=pointer]:
+        - /url: /templates
+    - button "Light mode" [ref=f1e35]
+  - main [ref=f1e42]:
+    - generic [ref=f1e43]:
+      - generic [ref=f1e44]:
+        - generic [ref=f1e45]:
+          - heading "Dashboard" [level=1] [ref=f1e46]
+          - paragraph [ref=f1e47]: Generate monthly reports from the bundled backend.
+        - generic [ref=f1e48]:
+          - button "Refresh" [ref=f1e49]
+          - button "Settings" [ref=f1e50]
+          - button "Generate Report" [disabled]
+          - button "Quick Report" [disabled]
+      - generic "Starting local backend..." [ref=f1e53]:
+        - paragraph [ref=f1e58]:
+          - text: Starting local backend...
+          - generic [ref=f1e59]: _

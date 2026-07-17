@@ -360,6 +360,17 @@ def post_generate_quick_report(body: GenerateQuickReportRequest):
         )
 
     slug = slugify_client_name(body.client_name)
+    if slug in HARDCODED_REPORT_NAMES:
+        # Quick Report injects this slug as a key into the shared GA4_PROPERTIES/GSC_URLS
+        # dicts and pops it in `finally` — reusing a real client's key would temporarily
+        # overwrite, then permanently delete, that client's live configuration.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Client name '{body.client_name}' conflicts with an existing report name. "
+                "Please choose a different client name."
+            ),
+        )
     report_id = create_report(slug, body.date_range, body.report_date)
     _cancel_flags[report_id] = threading.Event()
     _executor.submit(_run_generate_quick, report_id, slug, body)

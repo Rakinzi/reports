@@ -22,7 +22,31 @@
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
       "Bash(git -C /Users/rakinzisilver/Documents/GitHub/reports rev-parse --show-toplevel)",
-      "Bash(cat \"$\\(git -C /Users/rakinzisilver/Documents/GitHub/reports rev-parse --show-toplevel\\)/.superpowers/sdd/progress.md\")"
+      "Bash(cat \"$\\(git -C /Users/rakinzisilver/Documents/GitHub/reports rev-parse --show-toplevel\\)/.superpowers/sdd/progress.md\")",
+      "Bash(git commit *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 5e54c0c *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/task-brief *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package f5e912e *)",
+      "Bash(uv run *)",
+      "Bash(python *)",
+      "Bash(uv pip *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package f427bd4 *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 8d4bb5c *)",
+      "Bash(awk '/^def capture_2026/,0' src/reports/generator_2026.py)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 69b2cc6 *)",
+      "Bash(bun run *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package ee081f4 *)",
+      "Bash(bunx prettier *)",
+      "Bash(bunx eslint *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 4acf1de *)",
+      "Bash(grep -n '^import\\\\|from '\\\\''$lib\\\\|from '\\\\''lucide' frontend/src/routes/+page.svelte)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_snapshot",
+      "mcp__playwright__browser_click",
+      "mcp__playwright__browser_fill_form",
+      "Bash(python3 -c ' *)",
+      "Bash(grep *)",
+      "Bash(python3 *)"
     ]
   }
 }

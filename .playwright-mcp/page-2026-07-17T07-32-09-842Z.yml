@@ -1,0 +1,234 @@
+- generic:
+  - generic:
+    - generic:
+      - complementary:
+        - generic: Reports
+        - navigation:
+          - paragraph: Navigation
+          - link "Dashboard":
+            - /url: /
+          - link "Settings":
+            - /url: /settings
+          - link "Logs":
+            - /url: /logs
+          - link "Templates":
+            - /url: /templates
+        - generic:
+          - button "Light mode"
+      - main:
+        - generic:
+          - generic:
+            - generic:
+              - heading "Dashboard" [level=1]
+              - paragraph: Generate monthly reports from the bundled backend.
+            - generic:
+              - button "Refresh"
+              - button "Settings"
+              - button "Generate Report"
+              - button "Quick Report" [active]
+          - generic:
+            - generic:
+              - generic:
+                - generic: Total Reports
+                - generic:
+                  - paragraph: "16"
+              - generic:
+                - generic: Completed
+                - generic:
+                  - paragraph: "8"
+              - generic:
+                - generic: Pending
+                - generic:
+                  - paragraph: "1"
+              - generic:
+                - generic: Failed
+                - generic:
+                  - paragraph: "7"
+            - generic:
+              - generic: All Reports
+              - generic:
+                - generic:
+                  - table:
+                    - rowgroup:
+                      - row "Report Date Range Report Date Status Created Actions":
+                        - columnheader "Report"
+                        - columnheader "Date Range"
+                        - columnheader "Report Date"
+                        - columnheader "Status"
+                        - columnheader "Created"
+                        - columnheader "Actions"
+                    - rowgroup:
+                      - 'row "ecosure_health 1 June 2026 - 30 June 2026 17 July 2026 running pending 17 Jul 2026, 07:32 Generating report: Processing... Logs Stop"':
+                        - cell "ecosure_health"
+                        - cell "1 June 2026 - 30 June 2026"
+                        - cell "17 July 2026"
+                        - cell "running pending":
+                          - generic:
+                            - generic "running"
+                            - generic: pending
+                        - cell "17 Jul 2026, 07:32"
+                        - 'cell "Generating report: Processing... Logs Stop"':
+                          - generic:
+                            - 'generic "Generating report: Processing..."': Processing...
+                            - button "Logs"
+                            - button "Stop"
+                      - row "Infraco 3 July 2026 - 9 July 2026 10 July 2026 completed completed 10 Jul 2026, 08:59 Preview & Edit Save":
+                        - cell "Infraco"
+                        - cell "3 July 2026 - 9 July 2026"
+                        - cell "10 July 2026"
+                        - cell "completed completed":
+                          - generic:
+                            - generic "completed"
+                            - generic: completed
+                        - cell "10 Jul 2026, 08:59"
+                        - cell "Preview & Edit Save":
+                          - generic:
+                            - button "Preview & Edit"
+                            - button "Save"
+                            - button "Delete report"
+                      - row "Infraco 3 July 2026 - 9 July 2026 10 July 2026 failed failed 10 Jul 2026, 08:52 Retry":
+                        - cell "Infraco"
+                        - cell "3 July 2026 - 9 July 2026"
+                        - cell "10 July 2026"
+                        - cell "failed failed":
+                          - generic:
+                            - generic "failed"
+                            - generic: failed
+                        - cell "10 Jul 2026, 08:52"
+                        - cell "Retry":
+                          - generic:
+                            - button "Retry"
+                            - button "Delete report"
+                      - row "Infraco 3 July 2026 - 9 July 2026 10 July 2026 failed failed 10 Jul 2026, 08:34 Retry":
+                        - cell "Infraco"
+                        - cell "3 July 2026 - 9 July 2026"
+                        - cell "10 July 2026"
+                        - cell "failed failed":
+                          - generic:
+                            - generic "failed"
+                            - generic: failed
+                        - cell "10 Jul 2026, 08:34"
+                        - cell "Retry":
+                          - generic:
+                            - button "Retry"
+                            - button "Delete report"
+                      - row "Cancer Serve 1 April 2026 - 30 June 2026 07 July 2026 completed completed 07 Jul 2026, 08:15 Preview & Edit Save":
+                        - cell "Cancer Serve"
+                        - cell "1 April 2026 - 30 June 2026"
+                        - cell "07 July 2026"
+                        - cell "completed completed":
+                          - generic:
+                            - generic "completed"
+                            - generic: completed
+                        - cell "07 Jul 2026, 08:15"
+                        - cell "Preview & Edit Save":
+                          - generic:
+                            - button "Preview & Edit"
+                            - button "Save"
+                            - button "Delete report"
+                      - row "Cancer Serve 1 April 2026 - 30 June 2026 07 July 2026 failed failed 07 Jul 2026, 08:09 Retry":
+                        - cell "Cancer Serve"
+                        - cell "1 April 2026 - 30 June 2026"
+                        - cell "07 July 2026"
+                        - cell "failed failed":
+                          - generic:
+                            - generic "failed"
+                            - generic: failed
+                        - cell "07 Jul 2026, 08:09"
+                        - cell "Retry":
+                          - generic:
+                            - button "Retry"
+                            - button "Delete report"
+                      - row "Cancer Serve 1 June 2026 - 30 June 2026 30 June 2026 completed completed 06 Jul 2026, 08:35 Preview & Edit Save":
+                        - cell "Cancer Serve"
+                        - cell "1 June 2026 - 30 June 2026"
+                        - cell "30 June 2026"
+                        - cell "completed completed":
+                          - generic:
+                            - generic "completed"
+                            - generic: completed
+                        - cell "06 Jul 2026, 08:35"
+                        - cell "Preview & Edit Save":
+                          - generic:
+                            - button "Preview & Edit"
+                            - button "Save"
+                            - button "Delete report"
+                      - row "BancABC 1 June 2026 - 28 June 2026 29 June 2026 completed completed 06 Jul 2026, 08:11 Preview & Edit Save":
+                        - cell "BancABC"
+                        - cell "1 June 2026 - 28 June 2026"
+                        - cell "29 June 2026"
+                        - cell "completed completed":
+                          - generic:
+                            - generic "completed"
+                            - generic: completed
+                        - cell "06 Jul 2026, 08:11"
+                        - cell "Preview & Edit Save":
+                          - generic:
+                            - button "Preview & Edit"
+                            - button "Save"
+                            - button "Delete report"
+                      - row "BancABC 1 June 2026 - 28 June 2026 29 June 2026 failed failed 29 Jun 2026, 14:56 Retry":
+                        - cell "BancABC"
+                        - cell "1 June 2026 - 28 June 2026"
+                        - cell "29 June 2026"
+                        - cell "failed failed":
+                          - generic:
+                            - generic "failed"
+                            - generic: failed
+                        - cell "29 Jun 2026, 14:56"
+                        - cell "Retry":
+                          - generic:
+                            - button "Retry"
+                            - button "Delete report"
+                      - row "BancABC 1 June 2026 - 28 June 2026 29 June 2026 failed failed 29 Jun 2026, 14:49 Retry":
+                        - cell "BancABC"
+                        - cell "1 June 2026 - 28 June 2026"
+                        - cell "29 June 2026"
+                        - cell "failed failed":
+                          - generic:
+                            - generic "failed"
+                            - generic: failed
+                        - cell "29 Jun 2026, 14:49"
+                        - cell "Retry":
+                          - generic:
+                            - button "Retry"
+                            - button "Delete report"
+                - generic:
+                  - paragraph: Page 1 of 2 · 16 reports
+                  - generic:
+                    - button [disabled]
+                    - button
+  - dialog [ref=e242]:
+    - generic [ref=e243]:
+      - heading "Quick Report" [level=2] [ref=e244]
+      - generic [ref=e245]: Generate a report for any GA4 property — no template upload required.
+    - generic [ref=e246]:
+      - generic [ref=e247]:
+        - generic [ref=e248]: GA4 Property ID
+        - textbox "e.g. 523115644" [ref=e249]: "523115644"
+      - generic [ref=e250]:
+        - generic [ref=e251]: Client Name
+        - textbox "e.g. Union Hardware" [ref=e252]: Ecosure Health
+      - generic [ref=e253]:
+        - generic [ref=e254]: GSC Site URL (optional)
+        - textbox "https://example.com/" [ref=e255]: sc-domain:ecosurehealth.co.zw
+        - paragraph [ref=e256]: Leave blank to skip the Search Performance slide.
+      - generic [ref=e257]:
+        - generic [ref=e258]:
+          - generic [ref=e259]: Start Date
+          - textbox [ref=e260]: 2026-06-01
+        - generic [ref=e261]:
+          - generic [ref=e262]: End Date
+          - textbox [ref=e263]: 2026-06-30
+      - paragraph [ref=e275]: "Date range: 1 June 2026 - 30 June 2026"
+      - generic [ref=e264]:
+        - generic [ref=e265]: Report Date
+        - textbox [ref=e266]: 2026-07-17
+        - paragraph [ref=e276]: "Formatted: 17 July 2026"
+      - generic [ref=e267]:
+        - generic [ref=e268]: Logo (optional)
+        - button "Choose File" [ref=e269]
+      - generic [ref=e270]:
+        - button "Cancel" [ref=e271]
+        - button "Generate" [ref=e272]
+    - button "Close" [ref=e273]

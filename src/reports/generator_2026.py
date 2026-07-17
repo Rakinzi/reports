@@ -346,7 +346,7 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
     raw_para2 = (
         f"The consistently high proportion of new users suggests that marketing efforts, "
         f"search visibility, and broader brand exposure are successfully attracting first-time "
-        f"audiences to the platform. This level of new user acquisition indicates that the website "
+        f"audiences to the platform. This level of new user acquisition indicates that the {brand} website "
         f"remains highly discoverable and competitive within its category."
     )
 
@@ -1022,23 +1022,33 @@ def _restore_snapshot_route_after_date_apply(page, report_name: str, snapshot_ur
 
 def _return_to_snapshot_dashboard(page, report_name: str, snapshot_url: str):
     """Return to the same reporting-hub dashboard instead of relying on GA4 history."""
-    if page.url != snapshot_url:
-        logger.info("[2026] Returning to snapshot dashboard URL: %s", snapshot_url)
-        page.goto(snapshot_url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_function(
-        """
-        () => {
-            const href = window.location.href;
-            return href.includes('/reports/dashboard') &&
-                   href.includes('r=reporting-hub') &&
-                   !href.includes('/reports/start');
-        }
-        """,
-        timeout=20000,
-    )
-    _ensure_expected_ga4_property(page, report_name)
-    page.locator("ga-card[data-guidedhelpid='summary']").first.wait_for(state="visible", timeout=15000)
-    return page
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            if page.url != snapshot_url:
+                logger.info("[2026] Returning to snapshot dashboard URL (attempt %s): %s", attempt, snapshot_url)
+                page.goto(snapshot_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_function(
+                """
+                () => {
+                    const href = window.location.href;
+                    return href.includes('/reports/reportinghub') &&
+                           !href.includes('/reports/start');
+                }
+                """,
+                timeout=35000,
+            )
+            _ensure_expected_ga4_property(page, report_name)
+            page.locator("ga-card[data-guidedhelpid='summary']").first.wait_for(state="visible", timeout=15000)
+            return page
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "[2026] Returning to snapshot dashboard timed out on attempt %s: %s",
+                attempt, e,
+            )
+
+    raise last_error
 
 
 def _ga4_report_base_url(url: str) -> str:
@@ -1088,27 +1098,42 @@ def _ga4_explorer_url(snapshot_url: str, report_kind: str) -> str:
 
 def _goto_snapshot_explorer(page, report_name: str, snapshot_url: str, report_kind: str):
     target_url = _ga4_explorer_url(snapshot_url, report_kind)
-    logger.info("[2026] Navigating directly to GA4 %s explorer: %s", report_kind, target_url)
-    page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_function(
-        """
-        ({ reportKind }) => {
-            const href = window.location.href;
-            const expected = reportKind === 'countries'
-                ? 'r=user-demographics-detail'
-                : 'r=all-pages-and-screens';
-            return href.includes('/reports/explorer') &&
-                   href.includes(expected) &&
-                   href.includes('date00%3D') &&
-                   href.includes('date01%3D') &&
-                   !href.includes('/reports/start');
-        }
-        """,
-        arg={"reportKind": report_kind},
-        timeout=20000,
-    )
-    _ensure_expected_ga4_property(page, report_name)
-    return page
+
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            logger.info(
+                "[2026] Navigating directly to GA4 %s explorer (attempt %s): %s",
+                report_kind, attempt, target_url,
+            )
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_function(
+                """
+                ({ reportKind }) => {
+                    const href = window.location.href;
+                    const expected = reportKind === 'countries'
+                        ? 'r=user-demographics-detail'
+                        : 'r=all-pages-and-screens';
+                    return href.includes('/reports/explorer') &&
+                           href.includes(expected) &&
+                           href.includes('date00%3D') &&
+                           href.includes('date01%3D') &&
+                           !href.includes('/reports/start');
+                }
+                """,
+                arg={"reportKind": report_kind},
+                timeout=35000,
+            )
+            _ensure_expected_ga4_property(page, report_name)
+            return page
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "[2026] GA4 %s explorer navigation timed out on attempt %s: %s",
+                report_kind, attempt, e,
+            )
+
+    raise last_error
 
 
 def _capture_snapshot_card(page, out_dir: Path, screenshots: dict[str, Path]) -> None:
@@ -1194,8 +1219,8 @@ def capture_2026(
                 path = out_dir / "home_chart.png"
                 chart_el.screenshot(path=str(path))
                 screenshots["home_chart"] = path
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[2026] Home line chart screenshot failed for %s: %s", report_name, e)
 
             # --- Navigate to Reports Snapshot via the confirmed button ---
             _stage("Capturing GA4 snapshot metrics...")
@@ -1294,8 +1319,8 @@ def capture_2026(
 
                 page_views, pages_data, site_total_views = _scrape_pages_table(page)
                 _label_page_paths_with_gemini(pages_data)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[2026] Pages & screens capture failed for %s: %s", report_name, e)
 
             # --- Google Search Console: scrape metrics + screenshot (Slide 6) ---
             if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
@@ -1595,8 +1620,9 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
                 _write_para_with_highlights(para, exec_texts["para3"])
 
 
-def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, screenshots: dict) -> None:
+def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, screenshots: dict, template_name: str = "") -> None:
     """Replace stat values, subtitle, narratives, and chart on Slide 3 (Site Overview)."""
+    shape_key = template_name or report_name
     active_users = home_metrics.get("Active users", "N/A")
     new_users = home_metrics.get("New users", "N/A")
     engagement = home_metrics.get("Average engagement time per active user", "N/A")
@@ -1671,7 +1697,7 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
                 _write_para_with_highlights(para, para4)
 
     if "snapshot_card" in screenshots:
-        pic_name = _SLIDE3_SNAPSHOT_CARD_PICTURE.get(report_name)
+        pic_name = _SLIDE3_SNAPSHOT_CARD_PICTURE.get(shape_key)
         _replace_picture_with_fallback(
             slide,
             screenshots["snapshot_card"],
@@ -1682,7 +1708,7 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
     else:
         logger.warning("[2026] No snapshot_card screenshot available for %s slide 3", report_name)
 
-    narrative_shape_name = _SLIDE3_NARRATIVE_SHAPE.get(report_name, "object 15")
+    narrative_shape_name = _SLIDE3_NARRATIVE_SHAPE.get(shape_key, "object 15")
     narrative_shape = _shape_by_name(slide, narrative_shape_name)
     if narrative_shape is not None:
         _fill_paragraph_slots(narrative_shape, [para0, para2, para4], clear_extra=True)
@@ -1729,13 +1755,14 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict, report_n
         )
 
 
-def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0, report_name: str = "") -> None:
+def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_views: int = 0, report_name: str = "", template_name: str = "") -> None:
     """Replace pages table screenshot and narratives on Slide 5 (Page Performance)."""
+    shape_key = template_name or report_name
     if pages_data:
         heading, para1, para2, para3, para4, para5 = _page_perf_paras(pages_data, site_total_views)
         # Collect clean page labels for bolding (classification already ran inside _page_perf_paras)
         page_names = {p.get("_label", p["title"].split(" - ")[0].strip()) for p in pages_data}
-        narrative_shape_name = _SLIDE5_NARRATIVE_SHAPE.get(report_name, "object 7")
+        narrative_shape_name = _SLIDE5_NARRATIVE_SHAPE.get(shape_key, "object 7")
 
         for shape in slide.shapes:
             if not shape.has_text_frame:
@@ -1759,7 +1786,7 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
                 )
 
     if "pages_table" in screenshots:
-        pic_name = _SLIDE5_PAGES_TABLE_PICTURE.get(report_name)
+        pic_name = _SLIDE5_PAGES_TABLE_PICTURE.get(shape_key)
         _replace_picture_with_fallback(
             slide,
             screenshots["pages_table"],
@@ -2745,12 +2772,14 @@ def _generate_recommendations_2026(
         "- <specific action bullet 2>\n"
         "- <specific action bullet 3>\n"
         "- <specific action bullet 4>\n"
+        "- <specific action bullet 5>\n"
         "---\n"
         "TITLE: <action-oriented title, 4-7 words>\n"
         "BODY: <one sentence framing the recommendation>\n"
         "- <specific action bullet 1>\n"
         "- <specific action bullet 2>\n"
         "- <specific action bullet 3>\n"
+        "- <specific action bullet 4>\n"
         "---\n"
         "Use formal business English. No markdown bold, no em dashes. "
         "Be specific — reference actual page names, metrics, and visual observations from the screenshots."
@@ -2774,8 +2803,8 @@ def _generate_recommendations_2026(
     resp = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
     text = resp.text.strip()
 
-    # Expected bullets per rec matches template: rec1=5, rec2=4, rec3=3
-    bullet_counts = [5, 4, 3]
+    # Expected bullets per rec matches the Delta template's "object 4" shape: rec1=5, rec2=5, rec3=4
+    bullet_counts = [5, 5, 4]
 
     recs = []
     for i, block in enumerate(text.split("---")):
@@ -2804,27 +2833,31 @@ def _generate_recommendations_2026(
     return recs
 
 
-def _build_recommendations_slide(slide, report_name: str = "") -> None:
-    """Write placeholder text on the recommendations slide for manual completion."""
-    placeholders = [
-        ("Recommendation 1", [
-            "Add your first recommendation here.",
-            "Supporting point for recommendation 1.",
-            "Supporting point for recommendation 1.",
-        ]),
-        ("2. Recommendation 2", [
-            "Add your second recommendation here.",
-            "Supporting point for recommendation 2.",
-            "Supporting point for recommendation 2.",
-        ]),
-        ("3. Recommendation 3", [
-            "Add your third recommendation here.",
-            "Supporting point for recommendation 3.",
-            "Supporting point for recommendation 3.",
-        ]),
-    ]
+def _build_recommendations_slide(slide, report_name: str = "", template_name: str = "", recs: list[dict] | None = None) -> None:
+    """Write Gemini-generated recommendations (or placeholder text as a fallback) on the recommendations slide."""
+    shape_key = template_name or report_name
+    if recs:
+        placeholders = [(rec["title"], rec["bullets"]) for rec in recs]
+    else:
+        placeholders = [
+            ("Recommendation 1", [
+                "Add your first recommendation here.",
+                "Supporting point for recommendation 1.",
+                "Supporting point for recommendation 1.",
+            ]),
+            ("2. Recommendation 2", [
+                "Add your second recommendation here.",
+                "Supporting point for recommendation 2.",
+                "Supporting point for recommendation 2.",
+            ]),
+            ("3. Recommendation 3", [
+                "Add your third recommendation here.",
+                "Supporting point for recommendation 3.",
+                "Supporting point for recommendation 3.",
+            ]),
+        ]
 
-    recommendation_shape_name = _RECOMMENDATIONS_TEXT_SHAPE.get(report_name, "object 7")
+    recommendation_shape_name = _RECOMMENDATIONS_TEXT_SHAPE.get(shape_key, "object 7")
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
@@ -2840,18 +2873,35 @@ def _build_recommendations_slide(slide, report_name: str = "") -> None:
             para_offset = 1 if recommendation_shape_name == "object 4" else 0
             if para_offset and paras:
                 _fill_text_run(paras[0], "Three Key Initiatives to Enhance Performance")
-            layout = [
-                (0,  0, "title"),
-                (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
-                (4,  0, "bullet_3"), (5,  0, "bullet_4"),
-                (6,  1, "title"),
-                (7,  1, "bullet_0"), (8,  1, "bullet_1"), (9,  1, "bullet_2"),
-                (10, 1, "bullet_3"),
-                (11, 2, "title"),
-                (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
-            ]
+            if recommendation_shape_name == "object 4":
+                # Real Delta template shape: title + 5 bullets, title + 5 bullets, title + 4 bullets,
+                # with a blank spacer paragraph after each of the first two recommendations.
+                layout = [
+                    (0, 0, "title"),
+                    (1, 0, "bullet_0"), (2, 0, "bullet_1"), (3, 0, "bullet_2"),
+                    (4, 0, "bullet_3"), (5, 0, "bullet_4"),
+                    (7, 1, "title"),
+                    (8, 1, "bullet_0"), (9, 1, "bullet_1"), (10, 1, "bullet_2"),
+                    (11, 1, "bullet_3"), (12, 1, "bullet_4"),
+                    (14, 2, "title"),
+                    (15, 2, "bullet_0"), (16, 2, "bullet_1"), (17, 2, "bullet_2"),
+                    (18, 2, "bullet_3"),
+                ]
+            else:
+                layout = [
+                    (0,  0, "title"),
+                    (1,  0, "bullet_0"), (2,  0, "bullet_1"), (3,  0, "bullet_2"),
+                    (4,  0, "bullet_3"), (5,  0, "bullet_4"),
+                    (6,  1, "title"),
+                    (7,  1, "bullet_0"), (8,  1, "bullet_1"), (9,  1, "bullet_2"),
+                    (10, 1, "bullet_3"),
+                    (11, 2, "title"),
+                    (12, 2, "bullet_0"), (13, 2, "bullet_1"), (14, 2, "bullet_2"),
+                ]
+            used_indices = set()
             for para_idx, rec_idx, role in layout:
                 para_idx += para_offset
+                used_indices.add(para_idx)
                 if para_idx >= len(paras) or rec_idx >= len(placeholders):
                     continue
                 title, bullets = placeholders[rec_idx]
@@ -2864,8 +2914,9 @@ def _build_recommendations_slide(slide, report_name: str = "") -> None:
                         _fill_text_run(para, bullets[bullet_n])
                     else:
                         _fill_text_run(para, "")
-            for para in paras[para_offset + len(layout):]:
-                if para.text.strip():
+            trailing_start = max(used_indices) + 1 if used_indices else para_offset
+            for i, para in enumerate(paras):
+                if i >= trailing_start and i not in used_indices and para.text.strip():
                     _fill_text_run(para, "")
 
 
@@ -2923,7 +2974,11 @@ def generate_report_2026(
 
     rec_slide_idx = slide_count - 2
     _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-    _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name)
+    recs = _generate_recommendations_2026(
+        report_name, home_metrics, snapshot_metrics, search_metrics,
+        pages_data, countries_data, date_range,
+    )
+    _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name, recs=recs)
 
     # Step 4: Save
     safe_name = report_name.replace("_", "-")
@@ -2981,11 +3036,11 @@ def generate_quick_report(
         _stage("Building slide 2 up to complete...")
         _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
         _stage("Building slide 3 up to complete...")
-        _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
+        _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots, template_name="delta")
         _stage("Building slide 4 up to complete...")
         _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
         _stage("Building slide 5 up to complete...")
-        _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name)
+        _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name, template_name="delta")
 
         if not is_7_slide and slide_count >= 8:
             _stage("Building slide 6 up to complete...")
@@ -2993,7 +3048,11 @@ def generate_quick_report(
 
         rec_slide_idx = slide_count - 2
         _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-        _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name)
+        recs = _generate_recommendations_2026(
+            report_name, home_metrics, snapshot_metrics, search_metrics,
+            pages_data, countries_data, date_range,
+        )
+        _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name, template_name="delta", recs=recs)
 
         safe_name = report_name.replace("_", "-")
         output_path = OUTPUT_DIR / f"{safe_name}-{report_date.replace(' ', '-')}.pptx"
