@@ -3,7 +3,17 @@
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
 	import { onNavigate } from '$app/navigation';
-	import { FileText, LayoutDashboard, ChevronRight, Settings, ScrollText, Sun, Moon, Layers, RefreshCw } from '@lucide/svelte';
+	import {
+		FileText,
+		LayoutDashboard,
+		ChevronRight,
+		Settings,
+		ScrollText,
+		Sun,
+		Moon,
+		Layers,
+		RefreshCw
+	} from '@lucide/svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { resolveBackendContext, waitForBackend } from '$lib/backend';
 	import { restartBackendProcess } from '$lib/desktop';
@@ -13,6 +23,18 @@
 	let restartingBackend = $state(false);
 	let backendActionMessage = $state('');
 	let backendActionError = $state('');
+	let pageTitle = $derived.by(() => {
+		const pathname = $page.url.pathname;
+
+		if (pathname === '/') return 'Dashboard | Reports';
+		if (pathname === '/settings') return 'Settings | Reports';
+		if (pathname === '/logs') return 'Logs | Reports';
+		if (pathname === '/templates') return 'Report Templates | Reports';
+		if (/^\/templates\/[^/]+\/map\/?$/.test(pathname)) return 'Template Mapping | Reports';
+		if (/^\/reports\/[^/]+\/preview\/?$/.test(pathname)) return 'Report Preview | Reports';
+
+		return 'Reports';
+	});
 
 	onMount(() => {
 		theme.init();
@@ -48,12 +70,17 @@
 			backendActionMessage = 'Backend restarted. Reloading...';
 			window.location.reload();
 		} catch (error) {
-			backendActionError = error instanceof Error ? error.message : 'Could not restart the backend.';
+			backendActionError =
+				error instanceof Error ? error.message : 'Could not restart the backend.';
 		} finally {
 			restartingBackend = false;
 		}
 	}
 </script>
+
+<svelte:head>
+	<title>{pageTitle}</title>
+</svelte:head>
 
 <div class="flex h-screen overflow-hidden bg-background text-foreground">
 	<aside class="flex w-64 flex-col border-r border-border bg-card">
@@ -65,15 +92,15 @@
 		</div>
 
 		<nav class="flex-1 space-y-1 p-4">
-			<p class="px-3 pb-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">
+			<p class="px-3 pb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">
 				Navigation
 			</p>
 			<a
 				href="/"
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
 						{$page.url.pathname === '/'
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+					? 'bg-muted text-foreground'
+					: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
 			>
 				<LayoutDashboard class="h-4 w-4" />
 				Dashboard
@@ -85,8 +112,8 @@
 				href="/settings"
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
 						{$page.url.pathname === '/settings'
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+					? 'bg-muted text-foreground'
+					: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
 			>
 				<Settings class="h-4 w-4" />
 				Settings
@@ -98,8 +125,8 @@
 				href="/logs"
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
 						{$page.url.pathname === '/logs'
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+					? 'bg-muted text-foreground'
+					: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
 			>
 				<ScrollText class="h-4 w-4" />
 				Logs
@@ -111,8 +138,8 @@
 				href="/templates"
 				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
 						{$page.url.pathname.startsWith('/templates')
-						? 'bg-muted text-foreground'
-						: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+					? 'bg-muted text-foreground'
+					: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
 			>
 				<Layers class="h-4 w-4" />
 				Templates

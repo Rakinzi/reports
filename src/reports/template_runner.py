@@ -158,6 +158,7 @@ def generate_user_template(
                     start_date=start_date,
                     end_date=end_date,
                     ga4_property_id=pid,
+                    gsc_url=prop.get("gsc_url", ""),
                     metrics_context=metrics_context,
                 )
         finally:
@@ -436,6 +437,7 @@ def _capture_image_fields(
     start_date: str,
     end_date: str,
     ga4_property_id: str,
+    gsc_url: str,
     metrics_context: dict[str, dict],
 ) -> dict[str, Path]:
     """Return a dict of field_type → image Path for all image-type mappings."""
@@ -456,6 +458,7 @@ def _capture_image_fields(
                 start_date=start_date,
                 end_date=end_date,
                 ga4_property_id=ga4_property_id,
+                gsc_url=gsc_url,
                 metrics_context=metrics_context,
             )
             if path:
@@ -473,6 +476,7 @@ def _capture_single_image_field(
     start_date: str,
     end_date: str,
     ga4_property_id: str,
+    gsc_url: str,
     metrics_context: dict[str, dict],
 ) -> Path | None:
     """Capture a single screenshot or generate a chart for the given field_type."""
@@ -499,7 +503,24 @@ def _capture_single_image_field(
         page.locator("span.view-link-text", has_text="View pages and screens").click()
         page.wait_for_timeout(4000)
         page.screenshot(path=str(out_path), full_page=True)
-    elif field_type == "screenshot_search_console":
+    elif field_type in {"gsc_queries_table", "gsc_pages_table"}:
+        if not gsc_url:
+            logger.warning("No Search Console URL configured for '%s'", report_name)
+            return None
+        out_path = _capture_gsc_dimension_table(
+            page,
+            gsc_url,
+            start_date,
+            end_date,
+            "Queries" if field_type == "gsc_queries_table" else "Pages",
+            out_path,
+        )
+    elif field_type == "security_headers_screenshot":
+        if not gsc_url:
+            logger.warning("No website URL configured for '%s'", report_name)
+            return None
+        out_path = _capture_security_headers(page, gsc_url, out_path)
+    elif field_type in {"search_screenshot", "screenshot_search_console"}:
         page.screenshot(path=str(out_path))
     elif field_type.startswith("chart_"):
         out_path = _generate_chart(field_type, out_path, metrics_context)
@@ -507,6 +528,69 @@ def _capture_single_image_field(
         return None
 
     return out_path if out_path and out_path.exists() else None
+
+
+def _capture_gsc_dimension_table(
+    page,
+    gsc_url: str,
+    start_date: str,
+    end_date: str,
+    dimension: str,
+    out_path: Path,
+) -> Path:
+    """Capture the visible Queries or Pages table for a Search Console property."""
+    from datetime import datetime
+
+    from .generator_2026 import _gsc_performance_url, _open_gsc_performance_property
+
+    start_dt = datetime.strptime(start_date, "%b %d, %Y")
+    end_dt = datetime.strptime(end_date, "%b %d, %Y")
+    resource_id = _open_gsc_performance_property(page, gsc_url)
+    page.goto(
+        _gsc_performance_url(resource_id, start_dt, end_dt),
+        wait_until="domcontentloaded",
+        timeout=30000,
+    )
+    page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
+    page.wait_for_timeout(2000)
+
+    tab = page.get_by_role("tab", name=dimension, exact=True)
+    if tab.count() == 0:
+        tab = page.get_by_text(dimension, exact=True)
+    tab.first.click(timeout=15000)
+    page.wait_for_timeout(1500)
+
+    table = page.locator("table:visible").last
+    table.wait_for(state="visible", timeout=20000)
+    table.scroll_into_view_if_needed()
+    page.wait_for_timeout(750)
+    page.mouse.move(0, 0)
+    table.screenshot(path=str(out_path))
+    return out_path
+
+
+def _capture_security_headers(page, site_url: str, out_path: Path) -> Path:
+    """Scan a website on SecurityHeaders.com and capture the visible results viewport."""
+    page.goto("https://securityheaders.com/", wait_until="domcontentloaded", timeout=30000)
+
+    url_input = page.locator('input[name="q"]')
+    if url_input.count() == 0:
+        url_input = page.get_by_role("textbox").first
+    url_input.fill(site_url)
+
+    submit = page.get_by_role("button", name="Scan", exact=False)
+    if submit.count() == 0:
+        submit = page.locator('input[type="submit"], button[type="submit"]').first
+    submit.click()
+
+    page.wait_for_url(lambda url: "?q=" in url, timeout=120000)
+    page.get_by_text("Security Report Summary", exact=True).wait_for(
+        state="visible", timeout=120000
+    )
+    page.wait_for_timeout(1500)
+    page.evaluate("window.scrollTo(0, 0)")
+    page.screenshot(path=str(out_path), full_page=False)
+    return out_path
 
 
 def _generate_chart(field_type: str, out_path: Path, metrics_context: dict[str, dict]) -> Path | None:

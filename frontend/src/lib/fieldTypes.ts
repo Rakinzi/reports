@@ -240,7 +240,8 @@ export const FIELD_TYPES: FieldType[] = [
 		label: 'Chart: Traffic Source Pie',
 		group: 'Charts',
 		shapeType: 'image',
-		description: 'Generated pie chart — traffic by acquisition channel (generate_traffic_source_pie_chart)'
+		description:
+			'Generated pie chart — traffic by acquisition channel (generate_traffic_source_pie_chart)'
 	},
 	{
 		value: 'chart_user_type_pie',
@@ -270,7 +271,8 @@ export const FIELD_TYPES: FieldType[] = [
 		label: 'Screenshot: GA4 Snapshot Card',
 		group: 'Screenshots',
 		shapeType: 'image',
-		description: 'Screenshot of the GA4 Reports Snapshot overview card (screenshots["snapshot_card"])'
+		description:
+			'Screenshot of the GA4 Reports Snapshot overview card (screenshots["snapshot_card"])'
 	},
 	{
 		value: 'home_chart',
@@ -298,21 +300,45 @@ export const FIELD_TYPES: FieldType[] = [
 		label: 'Screenshot: Search Console',
 		group: 'Screenshots',
 		shapeType: 'image',
-		description: 'Screenshot of the Google Search Console performance view (screenshots["search_screenshot"])'
+		description:
+			'Screenshot of the Google Search Console performance view (screenshots["search_screenshot"])'
+	},
+	{
+		value: 'gsc_queries_table',
+		label: 'Screenshot: Search Console Queries Table',
+		group: 'Screenshots',
+		shapeType: 'image',
+		description: 'Screenshot of the Top queries table from Google Search Console'
+	},
+	{
+		value: 'gsc_pages_table',
+		label: 'Screenshot: Search Console Pages Table',
+		group: 'Screenshots',
+		shapeType: 'image',
+		description: 'Screenshot of the Top pages table from Google Search Console'
+	},
+	{
+		value: 'security_headers_screenshot',
+		label: 'Screenshot: Security Headers Results',
+		group: 'Screenshots',
+		shapeType: 'image',
+		description: 'Viewport screenshot of the SecurityHeaders.com scan results for the website'
 	},
 	{
 		value: 'platform_devices_table',
 		label: 'Screenshot: Platform Devices Table',
 		group: 'Screenshots',
 		shapeType: 'image',
-		description: 'Screenshot of the GA4 Tech > Overview > platform/device category table (screenshots["platform_devices_table"])'
+		description:
+			'Screenshot of the GA4 Tech > Overview > platform/device category table (screenshots["platform_devices_table"])'
 	},
 	{
 		value: 'browsers_table',
 		label: 'Screenshot: Browsers Table',
 		group: 'Screenshots',
 		shapeType: 'image',
-		description: 'Screenshot of the GA4 Tech > Overview > browsers table (screenshots["browsers_table"])'
+		description:
+			'Screenshot of the GA4 Tech > Overview > browsers table (screenshots["browsers_table"])'
 	},
 
 	// --- Decorative / Static ---
@@ -329,7 +355,7 @@ export const FIELD_TYPES: FieldType[] = [
 		group: 'Other',
 		shapeType: 'image',
 		description: 'Leave this image shape unchanged — it is a logo, icon, or decoration'
-	},
+	}
 ];
 
 export const FIELD_TYPE_MAP = new Map(FIELD_TYPES.map((f) => [f.value, f]));

@@ -1137,21 +1137,37 @@ def _goto_snapshot_explorer(page, report_name: str, snapshot_url: str, report_ki
 
 
 def _capture_snapshot_card(page, out_dir: Path, screenshots: dict[str, Path]) -> None:
-    """Capture the dated reporting-hub summary card before any drilldown navigation."""
-    card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
-    card_el.wait_for(state="visible", timeout=20000)
-    # Wait for the chart SVG inside the card to finish rendering data.
-    # GA4 renders chart data lazily — the card is visible before the line/bar data loads.
+    """Capture the dated reporting-hub summary card before any drilldown navigation.
+
+    Falls back to the dated home-page screenshot (taken before navigating to the
+    snapshot page) if the summary card can't be found/captured here — better to
+    reuse an already-dated screenshot than to have none for slides 1/3.
+    """
     try:
-        card_el.locator("svg path[d]").first.wait_for(state="visible", timeout=15000)
-        page.wait_for_timeout(3000)
-    except Exception:
-        page.wait_for_timeout(5000)
-    _dismiss_playwright_overlays(page)
-    path = out_dir / "snapshot_card.png"
-    card_el.screenshot(path=str(path))
-    screenshots["snapshot_card"] = path
-    logger.info("[2026] Captured dated snapshot card screenshot: %s", path)
+        card_el = page.locator("ga-card[data-guidedhelpid='summary']").first
+        card_el.wait_for(state="visible", timeout=20000)
+        # Wait for the chart SVG inside the card to finish rendering data.
+        # GA4 renders chart data lazily — the card is visible before the line/bar data loads.
+        try:
+            card_el.locator("svg path[d]").first.wait_for(state="visible", timeout=15000)
+            page.wait_for_timeout(3000)
+        except Exception:
+            page.wait_for_timeout(5000)
+        _dismiss_playwright_overlays(page)
+        path = out_dir / "snapshot_card.png"
+        card_el.screenshot(path=str(path))
+        screenshots["snapshot_card"] = path
+        logger.info("[2026] Captured dated snapshot card screenshot: %s", path)
+    except Exception as e:
+        fallback_path = screenshots.get("home_dated_fallback")
+        if fallback_path is not None:
+            screenshots["snapshot_card"] = fallback_path
+            logger.warning(
+                "[2026] Snapshot card capture failed (%s); using dated home screenshot as fallback: %s",
+                e, fallback_path,
+            )
+        else:
+            raise
 
 
 def capture_2026(
@@ -1201,6 +1217,22 @@ def capture_2026(
                 pass
             _set_date_range(page, start_date, end_date)
             home_metrics = _scrape_home_metrics(page)
+
+            # --- Dated home overview card, kept as a fallback for the snapshot card ---
+            # Taken here (dates already applied, still on /home) so that if the
+            # snapshot page's summary card capture fails later, we still have a
+            # dated screenshot to fall back to instead of nothing. ga-card.card_0
+            # is the overview card containing the KPIs, chart, and the
+            # "View reports snapshot" link.
+            try:
+                home_card_el = page.locator("ga-card.card_0").first
+                home_card_el.wait_for(state="visible", timeout=10000)
+                _dismiss_playwright_overlays(page)
+                fallback_path = out_dir / "home_dated_fallback.png"
+                home_card_el.screenshot(path=str(fallback_path))
+                screenshots["home_dated_fallback"] = fallback_path
+            except Exception as e:
+                logger.warning("[2026] Dated home fallback screenshot failed for %s: %s", report_name, e)
 
             # --- Home line chart screenshot (Slide 3) ---
             try:
