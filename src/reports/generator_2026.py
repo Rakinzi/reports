@@ -1527,6 +1527,10 @@ _SLIDE6_SEARCH_CONSOLE_PICTURE: dict[str, str] = {
     "bancabc":      "Picture 9",
 }
 
+_SLIDE_TRAFFIC_ACQ_PICTURE: dict[str, str] = {
+    "infraco": "Picture 32",
+}
+
 
 _SLIDE3_NARRATIVE_SHAPE: dict[str, str] = {
     "delta":   "object 16",
@@ -1856,6 +1860,42 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
         )
 
 
+def _build_slide_traffic_acquisition(
+    slide, rows: list[dict], totals: dict, screenshots: dict, report_name: str = "",
+) -> None:
+    """Fill the Traffic Acquisition slide: subtitle, narrative, and table screenshot."""
+    if rows:
+        subtitle, para1, para2, para3, para4 = _traffic_acquisition_paras(rows, totals)
+        source_medium_names = {r["source_medium"] for r in rows}
+
+        for shape in slide.shapes:
+            if not shape.has_text_frame:
+                continue
+
+            if shape.name == "object 3":
+                content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
+                if content_paras:
+                    _fill_text_run(content_paras[0], subtitle)
+
+            elif shape.name == "object 7":
+                _fill_paragraph_slots(
+                    shape,
+                    [para1, para2, para3, para4],
+                    bold_words=source_medium_names,
+                    clear_extra=True,
+                    skip_first=1,
+                )
+
+    if "traffic_acquisition_table" in screenshots:
+        pic_name = _SLIDE_TRAFFIC_ACQ_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["traffic_acquisition_table"],
+            candidate_names=(pic_name,) if pic_name else (),
+            slot_label=f"{report_name} traffic acquisition table",
+        )
+
+
 def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
     """Slide 6 — subtitle + 4 narrative paragraphs from real GSC data."""
     impressions = search_metrics.get("impressions", "N/A")
@@ -1903,6 +1943,62 @@ def _search_perf_paras(search_metrics: dict) -> tuple[str, str, str, str]:
     )
 
     return tuple(_gemini_paras_batch([subtitle_raw, raw_para0, raw_para1, raw_para2, raw_para3]))
+
+
+def _traffic_acquisition_paras(rows: list[dict], totals: dict) -> tuple[str, str, str, str, str]:
+    """Traffic Acquisition slide — subtitle + 4 narrative paragraphs from real data."""
+    if not rows:
+        return ("", "", "", "", "")
+
+    top = rows[0]
+    second = rows[1] if len(rows) > 1 else None
+
+    raw_subtitle = (
+        f"{top['source_medium']}"
+        + (f" and {second['source_medium']}" if second else "")
+        + f" lead Traffic Acquisition engagement with {top['sessions_pct']}"
+        + (f" and {second['sessions_pct']}" if second else "")
+        + " respectively"
+    )
+
+    raw_para1 = (
+        f"Paid traffic remains a primary source of website activity, with {top['source_medium']} "
+        f"generating {top['sessions']:,} sessions, accounting for {top['sessions_pct']} of total sessions. "
+        f"Its {top['engagement_rate']} engagement rate and {top['avg_engagement_time']} average engagement "
+        f"time show that it attracts substantial traffic, although user interaction remains moderate."
+    )
+
+    if second:
+        raw_para2 = (
+            f"{second['source_medium']} is the second-largest source with {second['sessions']:,} sessions, "
+            f"but its {second['engagement_rate']} engagement rate and {second['avg_engagement_time']} average "
+            f"engagement time indicate limited interaction relative to its traffic volume."
+        )
+    else:
+        raw_para2 = "No secondary traffic source was recorded with comparable volume during this period."
+
+    organic_rows = [r for r in rows if "organic" in r["source_medium"].lower()]
+    if organic_rows:
+        organic = max(organic_rows, key=lambda r: r["sessions"])
+        raw_para3 = (
+            f"Organic search produced strong traffic quality. {organic['source_medium']} achieved a "
+            f"{organic['engagement_rate']} engagement rate, an average engagement time of "
+            f"{organic['avg_engagement_time']}, and {organic['events_per_session']} events per session."
+        )
+    else:
+        raw_para3 = (
+            "Organic channels contributed a smaller share of sessions during this period, with paid "
+            "channels driving the majority of traffic volume."
+        )
+
+    raw_para4 = (
+        f"Overall, the website generated {totals.get('sessions', 0):,} sessions and "
+        f"{totals.get('engaged_sessions', 0):,} engaged sessions, with an overall engagement rate of "
+        f"{totals.get('engagement_rate', 'N/A')}. While paid campaigns drive most traffic volume, "
+        f"organic channels continue to deliver higher-quality engagement per session."
+    )
+
+    return tuple(_gemini_paras_batch([raw_subtitle, raw_para1, raw_para2, raw_para3, raw_para4]))
 
 
 def _build_slide6(slide, search_metrics: dict, screenshots: dict, report_name: str = "") -> None:
