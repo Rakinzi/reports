@@ -88,6 +88,12 @@ TEMPLATES_2026: dict[str, str] = {
 # 7-slide variants skip Slide 6 (Search Performance)
 SEVEN_SLIDE_REPORTS = {"zimplats", "dicomm"}
 
+# Reports whose template includes a Traffic Acquisition slide (detected via
+# _find_traffic_acquisition_slide_index at slide-build time). Gates the
+# capture_2026() scrape step so reports without this slide skip the extra
+# GA4 round-trip entirely.
+TRAFFIC_ACQUISITION_REPORTS = {"infraco"}
+
 
 def _find_traffic_acquisition_slide_index(prs) -> int | None:
     """Return the 0-based index of the 'Traffic Acquisition' slide, if present.
@@ -1386,31 +1392,32 @@ def capture_2026(
                 logger.warning("[2026] Pages & screens capture failed for %s: %s", report_name, e)
 
             # --- Traffic acquisition: screenshot + scrape channel breakdown ---
-            _stage("Capturing traffic acquisition data...")
-            try:
-                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
-                page = _open_traffic_acquisition_report(page, report_name, snapshot_dashboard_url)
-                row_num_col = page.locator("th.cdk-column-__row_index__").first
-                end_col = page.locator("th.cdk-column-DEFAULT-eventsPerSession").first
-                table = page.locator("table.adv-table").first
-                row_num_col.wait_for(state="visible", timeout=10000)
-                start_box = row_num_col.bounding_box()
-                end_box = end_col.bounding_box()
-                table_box = table.bounding_box()
-                clip = {
-                    "x": start_box["x"],
-                    "y": table_box["y"],
-                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                    "height": table_box["height"],
-                }
-                path = out_dir / "traffic_acquisition_table.png"
-                page.screenshot(path=str(path), clip=clip, full_page=True)
-                screenshots["traffic_acquisition_table"] = path
+            if report_name in TRAFFIC_ACQUISITION_REPORTS:
+                _stage("Capturing traffic acquisition data...")
+                try:
+                    page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+                    page = _open_traffic_acquisition_report(page, report_name, snapshot_dashboard_url)
+                    row_num_col = page.locator("th.cdk-column-__row_index__").first
+                    end_col = page.locator("th.cdk-column-DEFAULT-eventsPerSession").first
+                    table = page.locator("table.adv-table").first
+                    row_num_col.wait_for(state="visible", timeout=10000)
+                    start_box = row_num_col.bounding_box()
+                    end_box = end_col.bounding_box()
+                    table_box = table.bounding_box()
+                    clip = {
+                        "x": start_box["x"],
+                        "y": table_box["y"],
+                        "width": (end_box["x"] + end_box["width"]) - start_box["x"],
+                        "height": table_box["height"],
+                    }
+                    path = out_dir / "traffic_acquisition_table.png"
+                    page.screenshot(path=str(path), clip=clip, full_page=True)
+                    screenshots["traffic_acquisition_table"] = path
 
-                traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
-                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
-            except Exception as e:
-                logger.warning("[2026] Traffic acquisition capture failed for %s: %s", report_name, e)
+                    traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
+                    page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+                except Exception as e:
+                    logger.warning("[2026] Traffic acquisition capture failed for %s: %s", report_name, e)
 
             # --- Google Search Console: scrape metrics + screenshot (Slide 6) ---
             if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
