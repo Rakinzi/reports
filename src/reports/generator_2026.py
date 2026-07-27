@@ -88,6 +88,25 @@ TEMPLATES_2026: dict[str, str] = {
 # 7-slide variants skip Slide 6 (Search Performance)
 SEVEN_SLIDE_REPORTS = {"zimplats", "dicomm"}
 
+
+def _find_traffic_acquisition_slide_index(prs) -> int | None:
+    """Return the 0-based index of the 'Traffic Acquisition' slide, if present.
+
+    Only searches indices 4-7 — the slide always sits between Page Performance
+    and Search Performance in templates that have it, and restricting the scan
+    avoids false-positive title matches elsewhere in the deck.
+    """
+    for idx in range(4, min(8, len(prs.slides))):
+        slide = prs.slides[idx]
+        for shape in slide.shapes:
+            if not getattr(shape, "has_text_frame", False):
+                continue
+            text = shape.text_frame.text.strip()
+            if text.lower().startswith("traffic acquisition"):
+                return idx
+    return None
+
+
 # Google Search Console site URLs — used to build the performance report URL
 GSC_URLS: dict[str, str] = {
     "econet":       "https://www.econet.co.zw/",
