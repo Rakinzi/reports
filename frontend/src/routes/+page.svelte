@@ -56,7 +56,8 @@
 		{ value: 'cancer_serve', label: 'Cancer Serve', source: 'builtin' },
 		{ value: 'dicomm', label: 'Dicomm McCann', source: 'builtin' },
 		{ value: 'delta', label: 'Delta', source: 'builtin' },
-		{ value: 'bancabc', label: 'BancABC', source: 'builtin' }
+		{ value: 'bancabc', label: 'BancABC', source: 'builtin' },
+		{ value: 'mimosa', label: 'Mimosa', source: 'builtin' }
 	];
 
 	let reportOptions = $state<ReportOption[]>(FALLBACK_REPORT_OPTIONS);

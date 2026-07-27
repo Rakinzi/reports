@@ -70,47 +70,50 @@ GA4_PROPERTIES_2026: dict[str, str] = {
     "dicomm":       "382296904",
     "delta":        "448966594",
     "bancabc":      "403459265",
+    "mimosa":       "534956270",
 }
 
 TEMPLATES_2026: dict[str, str] = {
-    "econet":       "new/Econet March Website Report.pptx",
-    "econet_ai":    "new/Econet AI March Website Report.pptx",
-    "infraco":      "new/Econet Infraco March Website Report.pptx",
-    "ecocash":      "new/EcoCash March Website Report.pptx",
-    "ecosure":      "new/Ecosure March Website Report.pptx",
-    "zimplats":     "new/Zimplats March Website Report.pptx",
-    "cancer_serve": "new/Cancerserve March Website Report.pptx",
-    "dicomm":       "new/Dicomm March Website Report.pptx",
-    "delta":        "new/Delta Website Report - March .pptx",
-    "bancabc":      "new/Delta Website Report - March .pptx",
+    "econet":       "june-2026/econet-29-June-2026.pptx",
+    "econet_ai":    "june-2026/econet-ai-29-June-2026.pptx",
+    "infraco":      "june-2026/infraco-29-June-2026.pptx",
+    "ecocash":      "june-2026/ecocash-29-June-2026.pptx",
+    "ecosure":      "june-2026/ecosure-29-June-2026.pptx",
+    "zimplats":     "june-2026/zimplats-29-June-2026.pptx",
+    "cancer_serve": "june-2026/cancer_serve-29-June-2026.pptx",
+    "dicomm":       "june-2026/dicomm-29-June-2026.pptx",
+    "delta":        "june-2026/delta-25-June-2026.pptx",
+    "bancabc":      "june-2026/bancabc-29-June-2026.pptx",
+    "mimosa":       "june-2026/mimosa-29-June-2026.pptx",
 }
 
-# 7-slide variants skip Slide 6 (Search Performance)
-SEVEN_SLIDE_REPORTS = {"zimplats", "dicomm"}
+# These client templates intentionally omit Search Performance.
+NO_SEARCH_PERFORMANCE_REPORTS = {"zimplats", "dicomm"}
 
-# Reports whose template includes a Traffic Acquisition slide (detected via
-# _find_traffic_acquisition_slide_index at slide-build time). Gates the
-# capture_2026() scrape step so reports without this slide skip the extra
-# GA4 round-trip entirely.
-TRAFFIC_ACQUISITION_REPORTS = {"infraco"}
+# Traffic Acquisition is mandatory in every built-in report template.
+TRAFFIC_ACQUISITION_REPORTS: set[str] = set(TEMPLATES_2026)
 
 
-def _find_traffic_acquisition_slide_index(prs) -> int | None:
-    """Return the 0-based index of the 'Traffic Acquisition' slide, if present.
+def _find_slide_index(prs, title: str) -> int | None:
+    """Return the index of a slide whose heading starts with ``title``.
 
-    Only searches indices 4-7 — the slide always sits between Page Performance
-    and Search Performance in templates that have it, and restricting the scan
-    avoids false-positive title matches elsewhere in the deck.
+    Report templates intentionally add and remove pages, so slide builders must
+    route by semantic heading rather than by a fixed slide number.
     """
-    for idx in range(4, min(8, len(prs.slides))):
-        slide = prs.slides[idx]
+    wanted = title.casefold()
+    for idx, slide in enumerate(prs.slides):
         for shape in slide.shapes:
             if not getattr(shape, "has_text_frame", False):
                 continue
             text = shape.text_frame.text.strip()
-            if text.lower().startswith("traffic acquisition"):
+            if text.casefold().startswith(wanted):
                 return idx
     return None
+
+
+def _find_traffic_acquisition_slide_index(prs) -> int | None:
+    """Return the Traffic Acquisition slide index, if the template has one."""
+    return _find_slide_index(prs, "Traffic Acquisition")
 
 
 # Google Search Console site URLs — used to build the performance report URL
@@ -124,16 +127,29 @@ GSC_URLS: dict[str, str] = {
     "dicomm":       "https://www.dicomm.co.zw/",
     "delta":        "https://delta.co.zw/",
     "bancabc":      "https://www.bancabc.co.zw/",
+    "mimosa":       "https://www.mimosa.co.zw/",
+}
+
+SECURITY_HEADER_URLS: dict[str, str] = {
+    "bancabc":   "https://www.bancabc.co.zw/",
+    "delta":     "https://delta.co.zw/",
+    "dicomm":    "https://www.dicomm.co.zw/",
+    "ecocash":   "https://www.ecocash.co.zw/",
+    "econet":    "https://www.econet.co.zw/",
+    "econet_ai": "https://econetai.co.zw/",
+    "ecosure":   "https://ecosure.co.zw/",
+    "mimosa":    "https://www.mimosa.co.zw/",
+    "zimplats":  "https://zimplats.com/",
 }
 
 REPORT_DISPLAY_NAMES: dict[str, str] = {
     "bancabc": "BancABC",
+    "cancer_serve": "CancerServe",
+    "ecocash": "EcoCash",
+    "econet_ai": "Econet AI",
+    "ecosure": "EcoSure",
+    "infraco": "Econet Infraco",
 }
-
-BORROWED_TEMPLATE_SOURCE_NAMES: dict[str, str] = {
-    "bancabc": "Delta",
-}
-
 
 def _report_display_name(report_name: str) -> str:
     return REPORT_DISPLAY_NAMES.get(report_name, report_name.replace("_", " ").title())
@@ -205,12 +221,15 @@ def _write_para_with_highlights(para, text: str, bold_words: set[str] | None = N
     """Replace paragraph content with text, bolding numbers/percentages and any extra bold_words."""
     import lxml.etree as etree
 
-    if not para.runs:
-        return
-
-    # Save formatting from first run
-    first_rpr = para.runs[0]._r.find(qn("a:rPr"))
+    # Preserve the template's designed formatting. Cleared paragraphs have no
+    # runs, but PowerPoint retains their font/size/colour in ``endParaRPr``.
+    first_rpr = para.runs[0]._r.find(qn("a:rPr")) if para.runs else None
     base_rpr = deepcopy(first_rpr) if first_rpr is not None else None
+    if base_rpr is None:
+        end_rpr = para._p.find(qn("a:endParaRPr"))
+        if end_rpr is not None:
+            base_rpr = deepcopy(end_rpr)
+            base_rpr.tag = qn("a:rPr")
 
     # Remove all existing runs (keep pPr)
     for child in list(para._p):
@@ -250,7 +269,7 @@ def _write_para_with_highlights(para, text: str, bold_words: set[str] | None = N
 
 
 def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: dict) -> dict:
-    """Slide 2 — KPI values + narratives for para 0 and para 2."""
+    """Executive Summary values and fresh copy in the prior template's style."""
     active_users = home_metrics.get("Active users", "N/A")
     new_users = home_metrics.get("New users", "N/A")
     brand = _report_display_name(report_name)
@@ -279,57 +298,22 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
     except (ValueError, TypeError, ZeroDivisionError):
         new_pct = "N/A"
 
-    new_user_summary = (
-        f"of which {new_users} ({new_pct}) were new visitors"
-        if new_pct != "N/A"
-        else f"of which {new_users} were new visitors"
-    )
-
-    # Subtitle — same word count as template
-    raw_subtitle = f"Performance Overview: {new_pct} of users are first-time visitors"
-
-    # Para 0 — active users + new visitors count + new visitor %
-    raw_para0 = (
-        f"The {brand} website delivered solid overall performance during the period under review, "
-        f"attracting {active_users} active users, {new_user_summary}. "
-        f"This strong proportion of first-time users reflects effective audience acquisition "
-        f"and sustained brand visibility across digital channels."
-    )
-
     engagement = home_metrics.get("Average engagement time per active user", "N/A")
-
-    # Para 1 — discovery / returning users insight
-    raw_para1_no_gsc = (
-        f"The high proportion of new users suggests that the platform is still in a discovery phase, "
-        f"with most traffic coming from first-time visitors rather than returning users. "
-        f"Building on this momentum through targeted retention strategies will be key to growing a loyal audience."
-    )
-
-    # Para 2 — engagement insight (no CTR dependency)
-    raw_para2 = (
-        f"The average engagement time of {engagement} indicates meaningful interaction with the content. "
-        f"Users who visit the platform are spending time engaging rather than immediately exiting, "
-        f"which reflects relevant and compelling content despite the size of the audience."
-    )
-
-    # Para 3 — closing insight
-    raw_para3 = (
-        f"Overall, the data reflects strong top-of-funnel performance with effective audience acquisition "
-        f"and sustained brand visibility. The key opportunity going forward is to improve retention "
-        f"and encourage repeat visits as the platform continues to grow."
-    )
-
-    subtitle, para0, para1_no_gsc, para2, para3 = _gemini_paras_batch(
-        [raw_subtitle, raw_para0, raw_para1_no_gsc, raw_para2, raw_para3]
-    )
     return {
         "active_users_short": active_users_short,
         "new_pct": new_pct,
-        "subtitle": subtitle,
-        "para0": para0,
-        "para1_no_gsc": para1_no_gsc,
-        "para2": para2,
-        "para3": para3,
+        "subtitle": f"Performance overview shows {new_pct} of users were first-time visitors.",
+        "para0": (
+            f"During the reporting period, the {brand} website attracted {active_users} active users, "
+            f"including {new_users} ({new_pct}) new visitors. This audience mix reflects the website's "
+            "continued ability to reach and attract new users across digital channels."
+        ),
+        "para1_no_gsc": "",
+        "para2": (
+            f"Average engagement time was {engagement}, showing that visitors spent meaningful time "
+            "interacting with the website content rather than leaving immediately."
+        ),
+        "para3": "",
     }
 
 
@@ -845,51 +829,14 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
     selected_resource = _open_gsc_performance_property(gsc_page, gsc_site)
     logger.info("[2026] GSC property selected for %s using %s", report_name, selected_resource)
 
-    # 3. Set custom date range.
-    #    Some GSC instances show "Custom" directly in the toolbar; others hide it under "More".
-    #    Both open the same "Date range" modal with YYYY-MM-DD inputs.
-    try:
-        start_val = start_dt.strftime("%Y-%m-%d")
-        end_val   = end_dt.strftime("%Y-%m-%d")
-
-        # Try clicking "Custom" directly first; fall back to "More time ranges" → "Custom"
-        try:
-            gsc_page.locator('button[role="radio"]').filter(has_text="Custom").click(timeout=3000)
-        except Exception:
-            gsc_page.get_by_role("button", name="More time ranges").click(timeout=5000)
-            gsc_page.wait_for_timeout(500)
-            # Two "Custom" labels exist (Filter + Compare tabs) — click the Filter one
-            gsc_page.get_by_label("Filter", exact=True).get_by_text("Custom", exact=True).click(timeout=5000)
-
-        gsc_page.wait_for_timeout(600)
-
-        # Fill the date inputs inside the modal.
-        # The inputs have class "qdOxv-fmcmS-wGMbrd" and use aria-labelledby.
-        # Wait for them to appear, then fill by order (start=0, end=1).
-        gsc_page.wait_for_selector("input.qdOxv-fmcmS-wGMbrd", timeout=8000)
-        date_inputs = gsc_page.locator("input.qdOxv-fmcmS-wGMbrd")
-
-        date_inputs.nth(0).click(click_count=3)
-        date_inputs.nth(0).fill(start_val)
-        gsc_page.wait_for_timeout(200)
-        date_inputs.nth(1).click(click_count=3)
-        date_inputs.nth(1).fill(end_val)
-        gsc_page.wait_for_timeout(200)
-
-        # Click Apply — page reloads with new date range
-        gsc_page.get_by_role("button", name="Apply").click()
-        gsc_page.wait_for_timeout(5000)
-    except Exception as e:
-        logger.warning("[2026] GSC date picker failed, reloading with URL date params: %s", e)
-        # Fallback: open a fresh page with date params baked into URL
-        try:
-            gsc_page.close()
-        except Exception:
-            pass
-        gsc_page = context.new_page()
-        gsc_page.goto(_gsc_performance_url(selected_resource, start_dt, end_dt), wait_until="domcontentloaded", timeout=30000)
-        gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
-        gsc_page.wait_for_timeout(2000)
+    # 3. Load the dated performance URL directly. The GSC date-picker DOM changes
+    # frequently and can leave Playwright retrying intercepted clicks indefinitely.
+    dated_url = _gsc_performance_url(selected_resource, start_dt, end_dt)
+    logger.info("[2026] Loading dated GSC performance URL for %s", report_name)
+    gsc_page.goto(dated_url, wait_until="domcontentloaded", timeout=30000)
+    gsc_page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
+    gsc_page.wait_for_timeout(2000)
+    logger.info("[2026] Dated GSC performance loaded for %s", report_name)
 
     # 5. Scrape metrics
     body_text = gsc_page.locator("body").inner_text()
@@ -910,48 +857,79 @@ def _capture_gsc(context, report_name: str, start_date: str, end_date: str, out_
         "avg_position": _next_val_after("Average position"),
     }
 
-    # 6. Screenshot: metric cards + chart section
+    # Capture exactly the GSC performance module: four KPI cards and the full
+    # chart. The stable jsname belongs to the module itself and excludes the
+    # Search Console header, filters, and Queries table.
     try:
-        gsc_page.mouse.move(0, 0)
+        performance_module = gsc_page.locator('c-wiz[jsname="tqqCbc"]').first
+        performance_module.wait_for(state="visible", timeout=10000)
+        performance_module.scroll_into_view_if_needed()
         gsc_page.wait_for_timeout(500)
         path = out_dir / "search_console.png"
+        performance_module.screenshot(path=str(path))
+        screenshots["search_screenshot"] = path
+        logger.info("[2026] Captured GSC KPI cards and chart for %s", report_name)
+    except Exception as e:
+        logger.warning("[2026] GSC performance module capture failed for %s: %s", report_name, e)
 
-        gsc_page.evaluate("window.scrollTo(0, 0)")
+    # Capture and scrape the Queries table for templates with a Top Queries page.
+    top_queries: list[dict] = []
+    try:
+        logger.info("[2026] Capturing GSC Top Queries table for %s", report_name)
+        # Queries is the default dimension on the performance URL. Avoid clicking
+        # the tab: overlays in GSC can intercept that click and trigger retries.
+        query_table = gsc_page.locator("table:visible").last
+        query_table.wait_for(state="visible", timeout=10000)
+        query_table.scroll_into_view_if_needed()
         gsc_page.wait_for_timeout(500)
 
-        clip = gsc_page.evaluate("""() => {
-            // Find any leaf or near-leaf element whose trimmed text is 'Total clicks'
-            const all = Array.from(document.querySelectorAll('*'));
-            const label = all.find(el =>
-                el.textContent.trim() === 'Total clicks' &&
-                el.getBoundingClientRect().width > 0
-            );
-            if (!label) return null;
-            const vw = window.innerWidth;
-            let el = label;
-            for (let i = 0; i < 20; i++) {
-                el = el.parentElement;
-                if (!el) break;
-                const r = el.getBoundingClientRect();
-                if (r.width >= vw * 0.6 && r.height >= 400) {
-                    return { x: r.x, y: r.y, width: r.width, height: r.height };
-                }
-            }
-            return null;
-        }""")
+        rows = query_table.locator("tr, [role='row']")
+        # GSC sorts Queries by clicks descending by default. Read only enough
+        # visible rows to obtain the top two instead of traversing the virtual
+        # table, which can expose hundreds of rows and take several minutes.
+        for row_idx in range(min(rows.count(), 10)):
+            parsed = _parse_gsc_query_row(rows.nth(row_idx).inner_text(timeout=1000))
+            if parsed:
+                top_queries.append(parsed)
+                if len(top_queries) == 2:
+                    break
+        top_queries.sort(key=lambda row: row["clicks"], reverse=True)
+        search_metrics["top_queries"] = top_queries[:2]
 
-        if clip and clip["height"] > 50:
-            gsc_page.screenshot(path=str(path), clip=clip)
-        else:
-            # Fallback: screenshot just the top portion of the viewport
-            gsc_page.screenshot(path=str(path), clip={"x": 0, "y": 150, "width": 1920, "height": 550})
-
-        screenshots["search_screenshot"] = path
-    except Exception:
-        pass
+        query_path = out_dir / "top_queries.png"
+        query_table.screenshot(path=str(query_path))
+        screenshots["top_queries_screenshot"] = query_path
+        logger.info("[2026] Captured %d GSC Top Queries rows for %s", len(top_queries), report_name)
+    except Exception as e:
+        search_metrics["top_queries"] = []
+        logger.warning("[2026] GSC Top Queries capture failed for %s: %s", report_name, e)
 
     gsc_page.close()
     return search_metrics, screenshots
+
+
+def _parse_gsc_query_row(text: str) -> dict | None:
+    """Parse one GSC Queries row into query, clicks, and impressions."""
+    parts = [part.strip() for part in re.split(r"[\t\r\n]+", text) if part.strip()]
+    if not parts or parts[0].casefold() in {"query", "top queries", "clicks"}:
+        return None
+
+    if len(parts) >= 3:
+        query, clicks_text, impressions_text = parts[:3]
+    else:
+        match = re.match(r"^(.+?)\s+([\d,]+)\s+([\d,]+)$", " ".join(parts))
+        if not match:
+            return None
+        query, clicks_text, impressions_text = match.groups()
+
+    try:
+        return {
+            "query": query,
+            "clicks": int(clicks_text.replace(",", "")),
+            "impressions": int(impressions_text.replace(",", "")),
+        }
+    except ValueError:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1401,6 +1379,16 @@ def capture_2026(
                     end_col = page.locator("th.cdk-column-DEFAULT-eventsPerSession").first
                     table = page.locator("table.adv-table").first
                     row_num_col.wait_for(state="visible", timeout=10000)
+                    # Scrape while the leading ranked rows and Total row are
+                    # still mounted. Scrolling can virtualize those rows away.
+                    traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
+                    # GA4 renders only the currently exposed portion of long tables.
+                    # Match the proven Countries/Pages capture sequence so the
+                    # ranked channel rows are rendered before measuring the table.
+                    page.keyboard.press("End")
+                    page.wait_for_timeout(1000)
+                    page.mouse.wheel(0, 3000)
+                    page.wait_for_timeout(1000)
                     start_box = row_num_col.bounding_box()
                     end_box = end_col.bounding_box()
                     table_box = table.bounding_box()
@@ -1414,13 +1402,12 @@ def capture_2026(
                     page.screenshot(path=str(path), clip=clip, full_page=True)
                     screenshots["traffic_acquisition_table"] = path
 
-                    traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
                     page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
                 except Exception as e:
                     logger.warning("[2026] Traffic acquisition capture failed for %s: %s", report_name, e)
 
             # --- Google Search Console: scrape metrics + screenshot (Slide 6) ---
-            if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
+            if report_name not in NO_SEARCH_PERFORMANCE_REPORTS and report_name in GSC_URLS:
                 _stage("Capturing Google Search Console data...")
                 try:
                     search_metrics, gsc_screenshots = _capture_gsc(
@@ -1429,6 +1416,25 @@ def capture_2026(
                     screenshots.update(gsc_screenshots)
                 except Exception as e:
                     logger.warning("[2026] GSC capture failed for %s: %s", report_name, e)
+
+            # --- SecurityHeaders.com scan for templates with a Security page ---
+            if report_name in SECURITY_HEADER_URLS:
+                _stage("Capturing security headers scan...")
+                security_page = context.new_page()
+                try:
+                    from .template_runner import _capture_security_headers
+
+                    security_path = out_dir / "security_headers.png"
+                    _capture_security_headers(
+                        security_page,
+                        SECURITY_HEADER_URLS[report_name],
+                        security_path,
+                    )
+                    screenshots["security_headers_screenshot"] = security_path
+                except Exception as e:
+                    logger.warning("[2026] Security headers capture failed for %s: %s", report_name, e)
+                finally:
+                    security_page.close()
 
         finally:
             try:
@@ -1510,65 +1516,99 @@ def _replace_picture_with_fallback(
 # Per-template picture name for the KPI card slot on Slide 1 (right-side image).
 # "Picture 11" is always the footer logo — the KPI card is the other right-side picture.
 _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
-    "econet":       "Picture 10",
-    "econet_ai":    "Picture 14",
+    "econet":       "Picture 15",
+    "econet_ai":    "Picture 10",
     "infraco":      "Picture 13",
-    "ecocash":      "Picture 13",
-    "zimplats":     "Picture 15",
-    "cancer_serve": "Picture 12",
+    "ecocash":      "Picture 9",
+    "ecosure":      "Picture 10",
+    "zimplats":     "Picture 12",
+    "cancer_serve": "Picture 9",
     "dicomm":       "Picture 10",
     "delta":        "Picture 12",
-    "bancabc":      "Picture 12",
+    "bancabc":      "Picture 10",
+    "mimosa":       "Picture 11",
 }
 
 _SLIDE3_SNAPSHOT_CARD_PICTURE: dict[str, str] = {
-    "econet":       "Picture 19",
-    "econet_ai":    "Picture 18",
+    "econet":       "Picture 18",
+    "econet_ai":    "Picture 19",
     "infraco":      "Picture 19",
     "ecocash":      "Picture 19",
-    "zimplats":     "Picture 19",
-    "cancer_serve": "Picture 18",
-    "dicomm":       "Picture 18",
-    "delta":        "Picture 20",
+    "ecosure":      "Picture 19",
+    "zimplats":     "Picture 20",
+    "cancer_serve": "Picture 19",
+    "dicomm":       "Picture 19",
+    "delta":        "Picture 19",
     "bancabc":      "Picture 20",
+    "mimosa":       "Picture 21",
 }
 
 _SLIDE4_COUNTRIES_TABLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 9",
     "econet_ai":    "Picture 10",
-    "infraco":      "Picture 9",
-    "ecocash":      "Picture 9",
-    "zimplats":     "Picture 9",
+    "infraco":      "Picture 10",
+    "ecocash":      "Picture 10",
+    "ecosure":      "Picture 11",
+    "zimplats":     "Picture 10",
     "cancer_serve": "Picture 10",
     "dicomm":       "Picture 10",
-    "delta":        "Picture 11",
-    "bancabc":      "Picture 11",
+    "delta":        "Picture 9",
+    "bancabc":      "Picture 10",
+    "mimosa":       "Picture 2",
 }
 
 _SLIDE5_PAGES_TABLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 10",
-    "econet_ai":    "Picture 11",
-    "infraco":      "Picture 10",
-    "ecocash":      "Picture 10",
-    "zimplats":     "Picture 10",
+    "econet_ai":    "Picture 12",
+    "infraco":      "Picture 12",
+    "ecocash":      "Picture 11",
+    "ecosure":      "Picture 11",
+    "zimplats":     "Picture 12",
     "cancer_serve": "Picture 11",
     "dicomm":       "Picture 11",
-    "delta":        "Picture 10",
+    "delta":        "Picture 7",
     "bancabc":      "Picture 10",
+    "mimosa":       "Picture 5",
 }
 
 _SLIDE6_SEARCH_CONSOLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 8",
-    "econet_ai":    "Picture 8",
-    "infraco":      "Picture 9",
-    "ecocash":      "Picture 20",
-    "cancer_serve": "Picture 8",
-    "delta":        "Picture 9",
+    "econet_ai":    "Picture 9",
+    "infraco":      "Picture 8",
+    "ecocash":      "Picture 9",
+    "ecosure":      "Picture 9",
+    "cancer_serve": "Picture 9",
+    "delta":        "Picture 8",
     "bancabc":      "Picture 9",
+    "mimosa":       "Picture 9",
+}
+
+_TOP_QUERIES_PICTURE: dict[str, str] = {
+    "bancabc":      "Picture 1",
+    "cancer_serve": "Picture 1",
+    "delta":        "Picture 17",
+    "ecocash":      "Picture 1",
+    "econet":       "Picture 13",
+    "econet_ai":    "Picture 14",
+    "ecosure":      "Picture 1",
+    "infraco":      "Picture 13",
+    "mimosa":       "Picture 8",
+}
+
+_SECURITY_HEADERS_PICTURE: dict[str, str] = {
+    "bancabc":   "Picture 14",
+    "delta":     "Picture 12",
+    "dicomm":    "Picture 2",
+    "ecocash":   "Picture 18",
+    "econet":    "Picture 21",
+    "econet_ai": "Picture 14",
+    "ecosure":   "Picture 8",
+    "mimosa":    "Picture 9",
+    "zimplats":  "Picture 18",
 }
 
 _SLIDE_TRAFFIC_ACQ_PICTURE: dict[str, str] = {
-    "infraco": "Picture 32",
+    report_name: "Picture 32" for report_name in TEMPLATES_2026
 }
 
 
@@ -1607,9 +1647,16 @@ def _fill_paragraph_slots(
     skip_first: int = 0,
 ) -> bool:
     """Fill a text shape's non-empty paragraphs in order."""
-    paras = _non_empty_paragraphs(shape)
+    all_paras = list(shape.text_frame.paragraphs)
+    non_empty = [para for para in all_paras if para.text.strip()]
     if skip_first:
-        paras = paras[skip_first:]
+        # Prefer the designed non-empty slots. If template preparation cleared
+        # them, use the physical paragraphs after the fixed heading/label.
+        paras = non_empty[skip_first:]
+        if not paras:
+            paras = all_paras[skip_first:]
+    else:
+        paras = non_empty or all_paras
     if not paras:
         return False
 
@@ -1642,6 +1689,52 @@ def _build_slide1(slide, performance_month: str, screenshots: dict, report_name:
         )
 
 
+def _build_overview_slide(slide, report_name: str, date_range: str) -> None:
+    """Update the reporting period and client-specific scope on an Overview page."""
+    brand = _report_display_name(report_name)
+    # Keep same-month ranges in the approved compact form:
+    # "17 July 2026 - 23 July 2026" -> "17 July - 23 July 2026".
+    compact_range = re.sub(
+        r"^(\d{1,2}) ([A-Za-z]+) (\d{4}) - (\d{1,2}) \2 \3$",
+        r"\1 \2 - \4 \2 \3",
+        date_range,
+    )
+    paragraphs = [
+        (
+            f"This report aims to analyse the website’s performance for {compact_range}, "
+            "focusing on traffic, user flow, demographics, behaviours and security."
+        ),
+        (
+            f"The wider scope covers the ongoing management, maintenance and optimisation of the {brand} "
+            "website to ensure it remains secure, functional, updated and accessible. This includes CMS "
+            "maintenance, plugin and theme updates, application-level security monitoring, backup oversight, "
+            "performance and site health optimisation, technical SEO support, limited content and page updates, "
+            "third-party integration monitoring, incident response, access governance, change management and "
+            "monthly reporting."
+        ),
+        (
+            "The service is focused on keeping the website stable and professionally managed, while ensuring key "
+            "updates, risks, fixes and recommended actions are clearly documented."
+        ),
+    ]
+
+    narrative = _shape_by_name(slide, "object 8")
+    if narrative is None:
+        logger.warning("[2026] Overview narrative shape 'object 8' not found for %s", report_name)
+        return
+
+    content_paragraphs = _non_empty_paragraphs(narrative)
+    if len(content_paragraphs) >= 3:
+        _fill_paragraph_slots(narrative, paragraphs, clear_extra=True)
+    else:
+        all_paragraphs = narrative.text_frame.paragraphs
+        if all_paragraphs:
+            _fill_text_run(all_paragraphs[0], "\n\n".join(paragraphs))
+            for para in all_paragraphs[1:]:
+                if para.text:
+                    _fill_text_run(para, "")
+
+
 def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name: str, search_metrics: dict | None = None) -> None:
     """Replace KPI stat boxes and narrative on Slide 2 (Executive Summary)."""
     exec_texts = _exec_summary_texts(report_name, home_metrics, snapshot_metrics)
@@ -1649,18 +1742,19 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
     impressions = (search_metrics or {}).get("impressions", "N/A")
     avg_position = (search_metrics or {}).get("avg_position", "N/A")
 
-    raw_para1 = (
-        f"From a search visibility perspective, the website recorded {impressions} impressions "
-        f"with a {ctr} click-through rate and an average search position of {avg_position}, "
-        f"reflecting strong organic discoverability and continued relevance in search results."
+    para1_text = (
+        f"Organic search generated {impressions} impressions, with a {ctr} click-through rate and an "
+        f"average position of {avg_position}. These results indicate the website's visibility and "
+        "discoverability in search during the period."
+        if ctr != "N/A"
+        else ""
     )
-    para1_text = _gemini_para(raw_para1) if ctr != "N/A" else ""
-    narrative_values = [
+    narrative_values = [value for value in [
         exec_texts["para0"],
         para1_text or exec_texts["para1_no_gsc"],
         exec_texts["para2"],
         exec_texts["para3"],
-    ]
+    ] if value]
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
@@ -1907,24 +2001,50 @@ def _build_slide_traffic_acquisition(
     if rows:
         subtitle, para1, para2, para3, para4 = _traffic_acquisition_paras(rows, totals)
         source_medium_names = {r["source_medium"] for r in rows}
+    else:
+        subtitle = "Traffic Acquisition performance by session source and medium"
+        source_medium_names = set()
+        if totals:
+            para1 = (
+                f"Overall, the website generated {totals.get('sessions', 0):,} sessions and "
+                f"{totals.get('engaged_sessions', 0):,} engaged sessions, with an engagement rate of "
+                f"{totals.get('engagement_rate', 'N/A')} and average engagement time of "
+                f"{totals.get('avg_engagement_time', 'N/A')}."
+            )
+            para2 = (
+                "The accompanying source and medium table shows how individual acquisition channels "
+                "contributed to traffic volume and engagement during the reporting period."
+            )
+        else:
+            para1 = (
+                "The table compares website acquisition sources by sessions, engaged sessions, "
+                "engagement rate, average engagement time and events per session."
+            )
+            para2 = (
+                "Channels with both strong traffic volume and strong engagement represent the most "
+                "valuable acquisition sources, while high-volume channels with weaker interaction "
+                "should be reviewed for targeting and content improvements."
+            )
+        para3 = ""
+        para4 = ""
 
-        for shape in slide.shapes:
-            if not shape.has_text_frame:
-                continue
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
 
-            if shape.name == "object 3":
-                content_paras = [p for p in shape.text_frame.paragraphs if p.text.strip()]
-                if content_paras:
-                    _fill_text_run(content_paras[0], subtitle)
+        if shape.name == "object 3":
+            paragraphs = shape.text_frame.paragraphs
+            if paragraphs:
+                _fill_text_run(paragraphs[0], subtitle)
 
-            elif shape.name == "object 7":
-                _fill_paragraph_slots(
-                    shape,
-                    [para1, para2, para3, para4],
-                    bold_words=source_medium_names,
-                    clear_extra=True,
-                    skip_first=1,
-                )
+        elif shape.name == "object 7":
+            _fill_paragraph_slots(
+                shape,
+                [value for value in [para1, para2, para3, para4] if value],
+                bold_words=source_medium_names,
+                clear_extra=True,
+                skip_first=1,
+            )
 
     if "traffic_acquisition_table" in screenshots:
         pic_name = _SLIDE_TRAFFIC_ACQ_PICTURE.get(report_name)
@@ -2002,10 +2122,9 @@ def _traffic_acquisition_paras(rows: list[dict], totals: dict) -> tuple[str, str
     )
 
     raw_para1 = (
-        f"Paid traffic remains a primary source of website activity, with {top['source_medium']} "
-        f"generating {top['sessions']:,} sessions, accounting for {top['sessions_pct']} of total sessions. "
-        f"Its {top['engagement_rate']} engagement rate and {top['avg_engagement_time']} average engagement "
-        f"time show that it attracts substantial traffic, although user interaction remains moderate."
+        f"{top['source_medium']} led website acquisition with {top['sessions']:,} sessions, "
+        f"representing {top['sessions_pct']} of total sessions. It recorded a "
+        f"{top['engagement_rate']} engagement rate and {top['avg_engagement_time']} average engagement time."
     )
 
     if second:
@@ -2034,8 +2153,8 @@ def _traffic_acquisition_paras(rows: list[dict], totals: dict) -> tuple[str, str
     raw_para4 = (
         f"Overall, the website generated {totals.get('sessions', 0):,} sessions and "
         f"{totals.get('engaged_sessions', 0):,} engaged sessions, with an overall engagement rate of "
-        f"{totals.get('engagement_rate', 'N/A')}. While paid campaigns drive most traffic volume, "
-        f"organic channels continue to deliver higher-quality engagement per session."
+        f"{totals.get('engagement_rate', 'N/A')}. The channel mix highlights where acquisition volume "
+        f"and engagement quality were strongest during the reporting period."
     )
 
     return tuple(_gemini_paras_batch([raw_subtitle, raw_para1, raw_para2, raw_para3, raw_para4]))
@@ -2072,6 +2191,74 @@ def _build_slide6(slide, search_metrics: dict, screenshots: dict, report_name: s
         )
 
 
+def _build_slide_top_queries(slide, search_metrics: dict, screenshots: dict, report_name: str = "") -> None:
+    """Replace the Queries table and describe the two queries with most clicks."""
+    top_queries = search_metrics.get("top_queries", [])[:2]
+    if top_queries:
+        first = top_queries[0]
+        if len(top_queries) > 1:
+            second = top_queries[1]
+            insight = (
+                f'The leading search queries were “{first["query"]}” ({first["clicks"]:,} clicks) '
+                f'and “{second["query"]}” ({second["clicks"]:,} clicks). These terms represent '
+                "the strongest sources of organic search traffic during the reporting period."
+            )
+        else:
+            insight = (
+                f'The leading search query was “{first["query"]}” with {first["clicks"]:,} clicks '
+                "during the reporting period."
+            )
+        narrative = _shape_by_name(slide, "object 5")
+        if narrative is not None:
+            _fill_paragraph_slots(narrative, [insight], clear_extra=True)
+
+    if "top_queries_screenshot" in screenshots:
+        picture_name = _TOP_QUERIES_PICTURE.get(report_name)
+        _replace_picture_with_fallback(
+            slide,
+            screenshots["top_queries_screenshot"],
+            candidate_names=(picture_name,) if picture_name else (),
+            slot_label=f"{report_name} Top Queries table",
+        )
+
+
+def _build_slide_security(slide, screenshots: dict, report_name: str = "") -> None:
+    """Replace the SecurityHeaders.com result image on the first Security page."""
+    if "security_headers_screenshot" not in screenshots:
+        return
+    picture_name = _SECURITY_HEADERS_PICTURE.get(report_name)
+
+    # Some source decks contain an accidental second copy of the same image in
+    # the same slot (Delta has two overlapping shapes with the same image hash).
+    # Remove only exact duplicate images; distinct security evidence is retained.
+    target = next(
+        (shape for shape in slide.shapes if shape.name == picture_name and shape.shape_type == 13),
+        None,
+    )
+    if target is not None:
+        duplicate_shapes = [
+            shape for shape in slide.shapes
+            if shape.shape_type == 13
+            and shape.name != target.name
+            and shape.image.sha1 == target.image.sha1
+        ]
+        for duplicate in duplicate_shapes:
+            duplicate._element.getparent().remove(duplicate._element)
+            logger.info(
+                "[2026] Removed duplicate Security image '%s' (kept '%s')",
+                duplicate.name,
+                target.name,
+            )
+
+    _replace_picture_with_fallback(
+        slide,
+        screenshots["security_headers_screenshot"],
+        candidate_names=(picture_name,) if picture_name else (),
+        min_left_emu=4 * 914400,
+        slot_label=f"{report_name} SecurityHeaders.com result",
+    )
+
+
 def _prev_month_date_range(start_date: str) -> tuple[str, str]:
     """Return (prev_start, prev_end) strings given a start_date like 'Mar 1, 2026'."""
     from datetime import datetime, timedelta
@@ -2101,7 +2288,7 @@ def _scrape_prev_metrics_with_context(context, report_name: str, start_date: str
             page,
         ) = _capture_ga4_metrics_no_screenshots(context, report_name, prev_start, prev_end, existing_page=page)
         prev_search_metrics: dict = {}
-        if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
+        if report_name not in NO_SEARCH_PERFORMANCE_REPORTS and report_name in GSC_URLS:
             try:
                 prev_search_metrics, _ = _capture_gsc(
                     context,
@@ -2241,21 +2428,22 @@ def _parse_traffic_acquisition_row(line: str) -> dict | None:
     Expected shape (tab-separated, from page.locator('body').inner_text()):
     "\t1\tan / paid\t5,841 (36.81%)\t1,775 (37.06%)\t30.39%\t23s\t3.79\t22,125 (35.97%)\t0.00 (–)\t0%\t$0.00 (–)"
     """
-    m = re.match(
-        r"^\t\d+\t(.+?)\t([\d,]+)\s*\(([^)]+)\)\t([\d,]+)\s*\(([^)]+)\)\t([\d.]+%)\t(\S+(?:\s\S+)?)\t([\d.]+)\t",
-        line,
-    )
-    if not m:
+    parts = [part.strip() for part in re.split(r"[\t\r\n]+", line) if part.strip()]
+    if len(parts) < 7 or not parts[0].isdigit():
+        return None
+    sessions_match = re.match(r"^([\d,]+)\s*(?:\(([^)]+)\))?", parts[2])
+    engaged_match = re.match(r"^([\d,]+)\s*(?:\(([^)]+)\))?", parts[3])
+    if not sessions_match or not engaged_match or not re.match(r"^[\d.]+%$", parts[4]):
         return None
     return {
-        "source_medium": m.group(1).strip(),
-        "sessions": int(m.group(2).replace(",", "")),
-        "sessions_pct": m.group(3),
-        "engaged_sessions": int(m.group(4).replace(",", "")),
-        "engaged_sessions_pct": m.group(5),
-        "engagement_rate": m.group(6),
-        "avg_engagement_time": m.group(7),
-        "events_per_session": m.group(8),
+        "source_medium": parts[1],
+        "sessions": int(sessions_match.group(1).replace(",", "")),
+        "sessions_pct": sessions_match.group(2) or "N/A",
+        "engaged_sessions": int(engaged_match.group(1).replace(",", "")),
+        "engaged_sessions_pct": engaged_match.group(2) or "N/A",
+        "engagement_rate": parts[4],
+        "avg_engagement_time": parts[5],
+        "events_per_session": parts[6],
     }
 
 
@@ -2269,29 +2457,51 @@ def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
     rows: list[dict] = []
     totals: dict = {}
 
-    body = page.locator("body").inner_text()
-    lines = body.splitlines()
+    table = page.locator("table.adv-table").first
+    table_rows = table.locator("tr")
 
-    for i, line in enumerate(lines):
-        # The table's Total row is the tab-wrapped "\tTotal\t" line, distinct from
-        # the plain "Total" legend entry that appears earlier in the chart legend.
-        if line == "\tTotal\t" and i + 13 < len(lines):
-            try:
-                totals = {
-                    "sessions": int(lines[i + 1].replace(",", "")),
-                    "engaged_sessions": int(lines[i + 4].replace(",", "")),
-                    "engagement_rate": lines[i + 7],
-                    "avg_engagement_time": lines[i + 10],
-                    "events_per_session": lines[i + 13],
-                }
-            except (ValueError, IndexError):
-                totals = {}
-            break
+    def primary_value(cell_text: str) -> str:
+        return next(
+            (part.strip() for part in cell_text.splitlines() if part.strip()), ""
+        )
 
-    for line in lines:
-        parsed = _parse_traffic_acquisition_row(line)
+    for row_index in range(min(table_rows.count(), 20)):
+        cells = table_rows.nth(row_index).locator("th, td")
+        values = [primary_value(cells.nth(i).inner_text()) for i in range(cells.count())]
+        values = [value for value in values if value]
+        if not values:
+            continue
+
+        if "Total" in values:
+            total_index = values.index("Total")
+            metric_values = values[total_index + 1:]
+            if len(metric_values) >= 5:
+                try:
+                    totals = {
+                        "sessions": int(metric_values[0].replace(",", "")),
+                        "engaged_sessions": int(metric_values[1].replace(",", "")),
+                        "engagement_rate": metric_values[2],
+                        "avg_engagement_time": metric_values[3],
+                        "events_per_session": metric_values[4],
+                    }
+                except ValueError:
+                    totals = {}
+            continue
+
+        numeric_index = next(
+            (i for i, value in enumerate(values[:2]) if value.isdigit()), None
+        )
+        if numeric_index is None:
+            continue
+        parsed = _parse_traffic_acquisition_row("\t".join(values[numeric_index:]))
         if parsed:
             rows.append(parsed)
+
+    logger.info(
+        "[2026] Scraped %d Traffic Acquisition rows; totals=%s",
+        len(rows),
+        bool(totals),
+    )
 
     return rows, totals
 
@@ -3202,6 +3412,19 @@ def _build_recommendations_slide(slide, report_name: str = "", template_name: st
                     _fill_text_run(para, "")
 
 
+def _clear_recommendations_slide(slide) -> None:
+    """Keep the Recommendations heading and clear all recommendation copy."""
+    for shape in slide.shapes:
+        if not getattr(shape, "has_text_frame", False):
+            continue
+        paragraphs = shape.text_frame.paragraphs
+        if any(para.text.strip().casefold().startswith("recommendations") for para in paragraphs):
+            continue
+        for para in paragraphs:
+            if para.text:
+                _fill_text_run(para, "")
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -3232,8 +3455,14 @@ def generate_report_2026(
     template_path = TEMPLATES_DIR / TEMPLATES_2026[report_name]
     prs = Presentation(str(template_path))
     slide_count = len(prs.slides)
-    is_7_slide = report_name in SEVEN_SLIDE_REPORTS
-    traffic_acq_idx = _find_traffic_acquisition_slide_index(prs)
+    slide_indexes = {
+        title: _find_slide_index(prs, title)
+        for title in (
+            "Overview", "Executive Summary", "Site Overview", "Geographic Performance",
+            "Page Performance", "Traffic Acquisition", "Search Performance", "Top Queries", "Security",
+            "Recommendations",
+        )
+    }
 
     perf_month = _performance_month(date_range)
 
@@ -3242,33 +3471,54 @@ def generate_report_2026(
 
     _stage("Building slide 1 up to complete...")
     _build_slide1(prs.slides[0], perf_month, screenshots, report_name=report_name)
-    _stage("Building slide 2 up to complete...")
-    _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
-    _stage("Building slide 3 up to complete...")
-    _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots)
-    _stage("Building slide 4 up to complete...")
-    _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
-    _stage("Building slide 5 up to complete...")
-    _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name)
+    idx = slide_indexes["Overview"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_overview_slide(prs.slides[idx], report_name, date_range)
+    idx = slide_indexes["Executive Summary"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide2(prs.slides[idx], home_metrics, snapshot_metrics, report_name, search_metrics)
+    idx = slide_indexes["Site Overview"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide3(prs.slides[idx], home_metrics, snapshot_metrics, report_name, screenshots)
+    idx = slide_indexes["Geographic Performance"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide4(prs.slides[idx], countries_data, screenshots, report_name=report_name)
+    idx = slide_indexes["Page Performance"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide5(prs.slides[idx], pages_data, screenshots, site_total_views, report_name=report_name)
 
-    if traffic_acq_idx is not None:
-        _stage(f"Building slide {traffic_acq_idx + 1} up to complete...")
+    idx = slide_indexes["Traffic Acquisition"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
         _build_slide_traffic_acquisition(
-            prs.slides[traffic_acq_idx], traffic_acquisition_rows, traffic_acquisition_totals,
+            prs.slides[idx], traffic_acquisition_rows, traffic_acquisition_totals,
             screenshots, report_name=report_name,
         )
 
-    if not is_7_slide and slide_count >= 8:
-        _stage("Building slide 6 up to complete...")
-        _build_slide6(prs.slides[5], search_metrics, screenshots, report_name=report_name)
+    idx = slide_indexes["Search Performance"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide6(prs.slides[idx], search_metrics, screenshots, report_name=report_name)
 
-    rec_slide_idx = slide_count - 2
-    _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-    recs = _generate_recommendations_2026(
-        report_name, home_metrics, snapshot_metrics, search_metrics,
-        pages_data, countries_data, date_range,
-    )
-    _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name, recs=recs)
+    idx = slide_indexes["Top Queries"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide_top_queries(prs.slides[idx], search_metrics, screenshots, report_name=report_name)
+
+    idx = slide_indexes["Security"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _build_slide_security(prs.slides[idx], screenshots, report_name=report_name)
+
+    idx = slide_indexes["Recommendations"]
+    if idx is not None:
+        _stage(f"Building slide {idx + 1} up to complete...")
+        _clear_recommendations_slide(prs.slides[idx])
 
     # Step 4: Save
     safe_name = report_name.replace("_", "-")
@@ -3305,8 +3555,10 @@ def generate_quick_report(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     GA4_PROPERTIES[report_name] = ga4_property_id
+    TRAFFIC_ACQUISITION_REPORTS.add(report_name)
     if gsc_url:
         GSC_URLS[report_name] = gsc_url
+        SECURITY_HEADER_URLS[report_name] = gsc_url
     try:
         screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics, traffic_acquisition_rows, traffic_acquisition_totals = capture_2026(
             report_name, start_date, end_date, _stage_callback=_stage_callback
@@ -3315,8 +3567,14 @@ def generate_quick_report(
         template_path = TEMPLATES_DIR / TEMPLATES_2026["delta"]
         prs = Presentation(str(template_path))
         slide_count = len(prs.slides)
-        is_7_slide = not gsc_url
-        traffic_acq_idx = _find_traffic_acquisition_slide_index(prs)
+        slide_indexes = {
+            title: _find_slide_index(prs, title)
+            for title in (
+                "Overview", "Executive Summary", "Site Overview", "Geographic Performance",
+                "Page Performance", "Traffic Acquisition", "Search Performance", "Top Queries", "Security",
+                "Recommendations",
+            )
+        }
 
         perf_month = _performance_month(date_range)
 
@@ -3324,33 +3582,54 @@ def generate_quick_report(
 
         _stage("Building slide 1 up to complete...")
         _build_slide1(prs.slides[0], perf_month, screenshots, report_name=report_name)
-        _stage("Building slide 2 up to complete...")
-        _build_slide2(prs.slides[1], home_metrics, snapshot_metrics, report_name, search_metrics)
-        _stage("Building slide 3 up to complete...")
-        _build_slide3(prs.slides[2], home_metrics, snapshot_metrics, report_name, screenshots, template_name="delta")
-        _stage("Building slide 4 up to complete...")
-        _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
-        _stage("Building slide 5 up to complete...")
-        _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name, template_name="delta")
+        idx = slide_indexes["Overview"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_overview_slide(prs.slides[idx], report_name, date_range)
+        idx = slide_indexes["Executive Summary"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide2(prs.slides[idx], home_metrics, snapshot_metrics, report_name, search_metrics)
+        idx = slide_indexes["Site Overview"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide3(prs.slides[idx], home_metrics, snapshot_metrics, report_name, screenshots, template_name="delta")
+        idx = slide_indexes["Geographic Performance"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide4(prs.slides[idx], countries_data, screenshots, report_name=report_name)
+        idx = slide_indexes["Page Performance"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide5(prs.slides[idx], pages_data, screenshots, site_total_views, report_name=report_name, template_name="delta")
 
-        if traffic_acq_idx is not None:
-            _stage(f"Building slide {traffic_acq_idx + 1} up to complete...")
+        idx = slide_indexes["Traffic Acquisition"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
             _build_slide_traffic_acquisition(
-                prs.slides[traffic_acq_idx], traffic_acquisition_rows, traffic_acquisition_totals,
+                prs.slides[idx], traffic_acquisition_rows, traffic_acquisition_totals,
                 screenshots, report_name=report_name,
             )
 
-        if not is_7_slide and slide_count >= 8:
-            _stage("Building slide 6 up to complete...")
-            _build_slide6(prs.slides[5], search_metrics, screenshots, report_name=report_name)
+        idx = slide_indexes["Search Performance"]
+        if idx is not None and gsc_url:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide6(prs.slides[idx], search_metrics, screenshots, report_name=report_name)
 
-        rec_slide_idx = slide_count - 2
-        _stage(f"Building slide {rec_slide_idx + 1} up to complete...")
-        recs = _generate_recommendations_2026(
-            report_name, home_metrics, snapshot_metrics, search_metrics,
-            pages_data, countries_data, date_range,
-        )
-        _build_recommendations_slide(prs.slides[rec_slide_idx], report_name=report_name, template_name="delta", recs=recs)
+        idx = slide_indexes["Top Queries"]
+        if idx is not None and gsc_url:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide_top_queries(prs.slides[idx], search_metrics, screenshots, report_name=report_name)
+
+        idx = slide_indexes["Security"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _build_slide_security(prs.slides[idx], screenshots, report_name=report_name)
+
+        idx = slide_indexes["Recommendations"]
+        if idx is not None:
+            _stage(f"Building slide {idx + 1} up to complete...")
+            _clear_recommendations_slide(prs.slides[idx])
 
         safe_name = report_name.replace("_", "-")
         output_path = OUTPUT_DIR / f"{safe_name}-{report_date.replace(' ', '-')}.pptx"
@@ -3359,4 +3638,7 @@ def generate_quick_report(
         return output_path
     finally:
         GA4_PROPERTIES.pop(report_name, None)
+        if report_name not in TEMPLATES_2026:
+            TRAFFIC_ACQUISITION_REPORTS.discard(report_name)
         GSC_URLS.pop(report_name, None)
+        SECURITY_HEADER_URLS.pop(report_name, None)

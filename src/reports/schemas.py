@@ -6,7 +6,7 @@ _GA4_DATE_FMT = "%b %d, %Y"  # e.g. "Feb 1, 2026"
 HARDCODED_REPORT_NAMES: frozenset[str] = frozenset({
     "econet", "econet_ai", "infraco", "ecocash",
     "ecosure", "zimplats", "cancer_serve", "dicomm", "delta",
-    "bancabc",
+    "bancabc", "mimosa",
 })
 
 

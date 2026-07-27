@@ -72,6 +72,7 @@ GA4_PROPERTIES = {
     "dicomm":       "382296904",
     "delta":        "448966594",
     "bancabc":      "403459265",
+    "mimosa":       "534956270",
 }
 
 TEMPLATES = {
@@ -1321,6 +1322,18 @@ def _fill_text_run(para, new_text: str) -> None:
     import lxml.etree as etree
 
     if not para.runs:
+        # Cleared template paragraphs can legitimately contain no ``a:r``
+        # nodes. Recreate one using the paragraph's retained template style.
+        saved_rpr = None
+        end_rpr = para._p.find(qn("a:endParaRPr"))
+        if end_rpr is not None:
+            saved_rpr = deepcopy(end_rpr)
+            saved_rpr.tag = qn("a:rPr")
+        new_r = etree.SubElement(para._p, qn("a:r"))
+        if saved_rpr is not None:
+            new_r.insert(0, saved_rpr)
+        new_t = etree.SubElement(new_r, qn("a:t"))
+        new_t.text = new_text
         return
     first_rpr = para.runs[0]._r.find(qn("a:rPr"))
     saved_rpr = deepcopy(first_rpr) if first_rpr is not None else None

@@ -46,7 +46,19 @@
       "mcp__playwright__browser_fill_form",
       "Bash(python3 -c ' *)",
       "Bash(grep *)",
-      "Bash(python3 *)"
+      "Bash(python3 *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 76ee546 *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package f3fe16d *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package dd6db7d *)",
+      "Bash(jobs)",
+      "Bash(: *)",
+      "Bash(exit 0 *)",
+      "Bash(echo \"exit code: $?\")",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 2d2876d *)",
+      "Bash(/Users/rakinzisilver/.claude/plugins/cache/claude-plugins-official/superpowers/6.1.1/skills/subagent-driven-development/scripts/review-package 4d266d8 *)",
+      "Bash(echo \"EXIT_CODE=$?\")",
+      "Bash(tee /private/tmp/claude-501/-Users-rakinzisilver-Documents-GitHub-reports/fda0f608-1b82-43f2-a30d-2438093000e5/scratchpad/pytest_output.txt)",
+      "Bash(echo \"exit code of grep: $?\")"
     ]
   }
 }
