@@ -1108,6 +1108,14 @@ def _ga4_explorer_url(snapshot_url: str, report_kind: str) -> str:
             "params": "&".join(f"{key}={value}" for key, value in params.items()),
             "ruid": "all-pages-and-screens,life-cycle,engagement",
         }
+    elif report_kind == "traffic_acquisition":
+        report_id = "lifecycle-traffic-acquisition-v2"
+        params["_r.explorerCard..selmet"] = '["sessions"]'
+        params["_r.explorerCard..seldim"] = '["sessionSourceMedium"]'
+        query_parts = {
+            "r": report_id,
+            "params": "&".join(f"{key}={value}" for key, value in params.items()),
+        }
     else:
         raise ValueError(f"Unknown GA4 explorer report kind: {report_kind}")
 
@@ -1132,7 +1140,9 @@ def _goto_snapshot_explorer(page, report_name: str, snapshot_url: str, report_ki
                     const href = window.location.href;
                     const expected = reportKind === 'countries'
                         ? 'r=user-demographics-detail'
-                        : 'r=all-pages-and-screens';
+                        : reportKind === 'pages'
+                        ? 'r=all-pages-and-screens'
+                        : 'r=lifecycle-traffic-acquisition-v2';
                     return href.includes('/reports/explorer') &&
                            href.includes(expected) &&
                            href.includes('date00%3D') &&
@@ -2087,6 +2097,87 @@ def _scrape_countries_table(page) -> list[dict]:
                 "engaged_sessions_per_user": m.group(6),
             })
     return countries_data
+
+
+def _parse_traffic_acquisition_row(line: str) -> dict | None:
+    """Parse one data row from the Traffic Acquisition (Session source/medium) table.
+
+    Expected shape (tab-separated, from page.locator('body').inner_text()):
+    "\t1\tan / paid\t5,841 (36.81%)\t1,775 (37.06%)\t30.39%\t23s\t3.79\t22,125 (35.97%)\t0.00 (–)\t0%\t$0.00 (–)"
+    """
+    m = re.match(
+        r"^\t\d+\t(.+?)\t([\d,]+)\s*\(([^)]+)\)\t([\d,]+)\s*\(([^)]+)\)\t([\d.]+%)\t(\S+(?:\s\S+)?)\t([\d.]+)\t",
+        line,
+    )
+    if not m:
+        return None
+    return {
+        "source_medium": m.group(1).strip(),
+        "sessions": int(m.group(2).replace(",", "")),
+        "sessions_pct": m.group(3),
+        "engaged_sessions": int(m.group(4).replace(",", "")),
+        "engaged_sessions_pct": m.group(5),
+        "engagement_rate": m.group(6),
+        "avg_engagement_time": m.group(7),
+        "events_per_session": m.group(8),
+    }
+
+
+def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
+    """Scrape the Traffic Acquisition (Session source/medium) table.
+
+    Returns (rows, totals) — rows are up to 10 channel breakdown entries,
+    totals holds the aggregate Total row's sessions/engaged_sessions/
+    engagement_rate/avg_engagement_time/events_per_session.
+    """
+    rows: list[dict] = []
+    totals: dict = {}
+
+    body = page.locator("body").inner_text()
+    lines = body.splitlines()
+
+    for i, line in enumerate(lines):
+        # The table's Total row is the tab-wrapped "\tTotal\t" line, distinct from
+        # the plain "Total" legend entry that appears earlier in the chart legend.
+        if line == "\tTotal\t" and i + 13 < len(lines):
+            try:
+                totals = {
+                    "sessions": int(lines[i + 1].replace(",", "")),
+                    "engaged_sessions": int(lines[i + 4].replace(",", "")),
+                    "engagement_rate": lines[i + 7],
+                    "avg_engagement_time": lines[i + 10],
+                    "events_per_session": lines[i + 13],
+                }
+            except (ValueError, IndexError):
+                totals = {}
+            break
+
+    for line in lines:
+        parsed = _parse_traffic_acquisition_row(line)
+        if parsed:
+            rows.append(parsed)
+
+    return rows, totals
+
+
+def _open_traffic_acquisition_report(page, report_name: str, snapshot_url: str):
+    """Navigate from an open snapshot page to the Traffic Acquisition report,
+    switched to the 'Session source / medium' dimension. Returns the page."""
+    page = _goto_snapshot_explorer(page, report_name, snapshot_url, "traffic_acquisition")
+    page.wait_for_timeout(3000)
+
+    _dismiss_playwright_overlays(page)
+    button = page.locator("button[data-guidedhelpid='table-dimension-picker']").first
+    button.wait_for(state="visible", timeout=8000)
+    button.click(force=True)
+    page.wait_for_timeout(1500)
+
+    option = page.get_by_text("Session source / medium", exact=True).first
+    option.wait_for(state="visible", timeout=5000)
+    option.click()
+    page.wait_for_timeout(3000)
+    page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
+    return page
 
 
 def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
