@@ -1204,7 +1204,7 @@ def capture_2026(
     start_date: str,
     end_date: str,
     _stage_callback=None,
-) -> tuple[dict[str, Path], dict, dict, dict]:
+) -> tuple[dict[str, Path], dict, dict, dict, list, int, list, dict, list, dict]:
     """Navigate GA4, capture all screenshots and metrics needed for the 2026 pipeline.
 
     Returns: (screenshots, home_metrics, snapshot_metrics, page_views)
@@ -1224,6 +1224,8 @@ def capture_2026(
     site_total_views: int = 0   # total views across ALL pages (from GA4 Total row)
     countries_data: list[dict] = []  # rich per-country rows: {country, users, engagement_rate, engaged_sessions_per_user}
     search_metrics: dict = {}   # GSC metrics: impressions, clicks, ctr, avg_position
+    traffic_acquisition_rows: list[dict] = []
+    traffic_acquisition_totals: dict = {}
 
     with sync_playwright() as p:
         context = _launch_persistent_context(p, headless=False)
@@ -1383,6 +1385,33 @@ def capture_2026(
             except Exception as e:
                 logger.warning("[2026] Pages & screens capture failed for %s: %s", report_name, e)
 
+            # --- Traffic acquisition: screenshot + scrape channel breakdown ---
+            _stage("Capturing traffic acquisition data...")
+            try:
+                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+                page = _open_traffic_acquisition_report(page, report_name, snapshot_dashboard_url)
+                row_num_col = page.locator("th.cdk-column-__row_index__").first
+                end_col = page.locator("th.cdk-column-DEFAULT-eventsPerSession").first
+                table = page.locator("table.adv-table").first
+                row_num_col.wait_for(state="visible", timeout=10000)
+                start_box = row_num_col.bounding_box()
+                end_box = end_col.bounding_box()
+                table_box = table.bounding_box()
+                clip = {
+                    "x": start_box["x"],
+                    "y": table_box["y"],
+                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
+                    "height": table_box["height"],
+                }
+                path = out_dir / "traffic_acquisition_table.png"
+                page.screenshot(path=str(path), clip=clip, full_page=True)
+                screenshots["traffic_acquisition_table"] = path
+
+                traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
+                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
+            except Exception as e:
+                logger.warning("[2026] Traffic acquisition capture failed for %s: %s", report_name, e)
+
             # --- Google Search Console: scrape metrics + screenshot (Slide 6) ---
             if report_name not in SEVEN_SLIDE_REPORTS and report_name in GSC_URLS:
                 _stage("Capturing Google Search Console data...")
@@ -1400,7 +1429,11 @@ def capture_2026(
             except Exception:
                 pass
 
-    return screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics
+    return (
+        screenshots, home_metrics, snapshot_metrics, page_views,
+        pages_data, site_total_views, countries_data, search_metrics,
+        traffic_acquisition_rows, traffic_acquisition_totals,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -3179,7 +3212,7 @@ def generate_report_2026(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     # Step 1: Capture screenshots + metrics
-    screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics = capture_2026(
+    screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics, traffic_acquisition_rows, traffic_acquisition_totals = capture_2026(
         report_name, start_date, end_date, _stage_callback=_stage_callback
     )
 
@@ -3189,6 +3222,7 @@ def generate_report_2026(
     prs = Presentation(str(template_path))
     slide_count = len(prs.slides)
     is_7_slide = report_name in SEVEN_SLIDE_REPORTS
+    traffic_acq_idx = _find_traffic_acquisition_slide_index(prs)
 
     perf_month = _performance_month(date_range)
 
@@ -3205,6 +3239,13 @@ def generate_report_2026(
     _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
     _stage("Building slide 5 up to complete...")
     _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name)
+
+    if traffic_acq_idx is not None:
+        _stage(f"Building slide {traffic_acq_idx + 1} up to complete...")
+        _build_slide_traffic_acquisition(
+            prs.slides[traffic_acq_idx], traffic_acquisition_rows, traffic_acquisition_totals,
+            screenshots, report_name=report_name,
+        )
 
     if not is_7_slide and slide_count >= 8:
         _stage("Building slide 6 up to complete...")
@@ -3256,7 +3297,7 @@ def generate_quick_report(
     if gsc_url:
         GSC_URLS[report_name] = gsc_url
     try:
-        screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics = capture_2026(
+        screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics, traffic_acquisition_rows, traffic_acquisition_totals = capture_2026(
             report_name, start_date, end_date, _stage_callback=_stage_callback
         )
 
@@ -3264,6 +3305,7 @@ def generate_quick_report(
         prs = Presentation(str(template_path))
         slide_count = len(prs.slides)
         is_7_slide = not gsc_url
+        traffic_acq_idx = _find_traffic_acquisition_slide_index(prs)
 
         perf_month = _performance_month(date_range)
 
@@ -3279,6 +3321,13 @@ def generate_quick_report(
         _build_slide4(prs.slides[3], countries_data, screenshots, report_name=report_name)
         _stage("Building slide 5 up to complete...")
         _build_slide5(prs.slides[4], pages_data, screenshots, site_total_views, report_name=report_name, template_name="delta")
+
+        if traffic_acq_idx is not None:
+            _stage(f"Building slide {traffic_acq_idx + 1} up to complete...")
+            _build_slide_traffic_acquisition(
+                prs.slides[traffic_acq_idx], traffic_acquisition_rows, traffic_acquisition_totals,
+                screenshots, report_name=report_name,
+            )
 
         if not is_7_slide and slide_count >= 8:
             _stage("Building slide 6 up to complete...")
