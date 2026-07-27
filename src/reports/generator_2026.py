@@ -2291,20 +2291,24 @@ def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
 
 def _open_traffic_acquisition_report(page, report_name: str, snapshot_url: str):
     """Navigate from an open snapshot page to the Traffic Acquisition report,
-    switched to the 'Session source / medium' dimension. Returns the page."""
+    switched to the 'Session source / medium' dimension. Returns the page.
+
+    _goto_snapshot_explorer already builds the explorer URL with
+    `_r.explorerCard..seldim=["sessionSourceMedium"]`, so the table already
+    loads with "Session source / medium" as its dimension immediately after
+    navigation — no dimension-picker button/option click is needed. Manual
+    verification confirmed the table headers and dimension-picker button
+    label already read "Session source / medium" right after the URL nav,
+    before any click. Live testing showed the extra button+option click was
+    unreliable: it re-opened the (already-selected) dimension picker listbox,
+    and `get_by_text("Session source / medium", exact=True).first` could
+    match an unrelated/hidden text node elsewhere on the page (intercepted by
+    a `.tree-branch` element from the GA4 left-nav), causing click timeouts.
+    """
     page = _goto_snapshot_explorer(page, report_name, snapshot_url, "traffic_acquisition")
     page.wait_for_timeout(3000)
 
     _dismiss_playwright_overlays(page)
-    button = page.locator("button[data-guidedhelpid='table-dimension-picker']").first
-    button.wait_for(state="visible", timeout=8000)
-    button.click(force=True)
-    page.wait_for_timeout(1500)
-
-    option = page.get_by_text("Session source / medium", exact=True).first
-    option.wait_for(state="visible", timeout=5000)
-    option.click()
-    page.wait_for_timeout(3000)
     page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
     return page
 
