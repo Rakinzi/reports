@@ -280,6 +280,7 @@ def test_traffic_acquisition_paras_uses_top_two_channels(monkeypatch):
     assert "46.7%" in subtitle
     assert "1,967" in para1
     assert "fb / paid" in para2
+    assert "more limited interaction than the leading source" in para2
     assert "4,212" in para4
 
 

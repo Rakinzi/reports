@@ -1090,6 +1090,38 @@ def _ga4_dated_snapshot_url(snapshot_url: str, expected_start: str, expected_end
     )
 
 
+def _open_dated_snapshot_direct(page, report_name: str, start_date: str, end_date: str):
+    """Open an explicitly dated snapshot without depending on the GA4 Home UI."""
+    from datetime import datetime as _dt
+
+    expected_start = _dt.strptime(start_date, "%b %d, %Y").strftime("%Y%m%d")
+    expected_end = _dt.strptime(end_date, "%b %d, %Y").strftime("%Y%m%d")
+    snapshot_url = _ga4_url(report_name, "/reports/reportinghub")
+    dated_url = _ga4_dated_snapshot_url(snapshot_url, expected_start, expected_end)
+    logger.warning(
+        "[2026] Opening dated GA4 snapshot directly for %s: %s",
+        report_name,
+        dated_url,
+    )
+    page.goto(dated_url, wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_function(
+        """
+        ({ expectedStart, expectedEnd }) => {
+            const href = window.location.href;
+            return href.includes('/reports/reportinghub') &&
+                   href.includes(`date00%3D${expectedStart}`) &&
+                   href.includes(`date01%3D${expectedEnd}`) &&
+                   !href.includes('/reports/start');
+        }
+        """,
+        arg={"expectedStart": expected_start, "expectedEnd": expected_end},
+        timeout=35000,
+    )
+    _ensure_expected_ga4_property(page, report_name)
+    page.wait_for_timeout(3000)
+    return page
+
+
 def _ga4_explorer_url(snapshot_url: str, report_kind: str) -> str:
     base_url = _ga4_report_base_url(snapshot_url)
     params = dict(parse_qsl(_ga4_snapshot_params(snapshot_url), keep_blank_values=True))
@@ -1253,8 +1285,17 @@ def capture_2026(
                 page.wait_for_timeout(1000)
             except Exception:
                 pass
-            _set_date_range(page, start_date, end_date)
-            home_metrics = _scrape_home_metrics(page)
+            home_ready = True
+            try:
+                _set_date_range(page, start_date, end_date)
+                home_metrics = _scrape_home_metrics(page)
+            except Exception as e:
+                home_ready = False
+                logger.warning(
+                    "[2026] GA4 Home was unavailable for %s (%s); continuing via direct dated snapshot",
+                    report_name,
+                    e,
+                )
 
             # --- Dated home overview card, kept as a fallback for the snapshot card ---
             # Taken here (dates already applied, still on /home) so that if the
@@ -1263,6 +1304,8 @@ def capture_2026(
             # is the overview card containing the KPIs, chart, and the
             # "View reports snapshot" link.
             try:
+                if not home_ready:
+                    raise RuntimeError("dated GA4 Home view was unavailable")
                 home_card_el = page.locator("ga-card.card_0").first
                 home_card_el.wait_for(state="visible", timeout=10000)
                 _dismiss_playwright_overlays(page)
@@ -1274,6 +1317,8 @@ def capture_2026(
 
             # --- Home line chart screenshot (Slide 3) ---
             try:
+                if not home_ready:
+                    raise RuntimeError("dated GA4 Home view was unavailable")
                 chart_el = page.locator("ga-card.card_0 ga-tab-chart")
                 chart_el.wait_for(state="visible", timeout=10000)
                 # Ensure the "Active users" tab is selected (GA4 remembers the last active tab).
@@ -1294,7 +1339,12 @@ def capture_2026(
 
             # --- Navigate to Reports Snapshot via the confirmed button ---
             _stage("Capturing GA4 snapshot metrics...")
-            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+            if home_ready:
+                _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+            else:
+                page = _open_dated_snapshot_direct(
+                    page, report_name, start_date, end_date
+                )
             snapshot_dashboard_url = page.url
 
             # Capture immediately after Apply + dashboard reload, before scraping or drilldowns.
@@ -1398,31 +1448,16 @@ def capture_2026(
                 try:
                     page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
                     page = _open_traffic_acquisition_report(page, report_name, snapshot_dashboard_url)
-                    row_num_col = page.locator("th.cdk-column-__row_index__").first
-                    end_col = page.locator("th.cdk-column-DEFAULT-eventsPerSession").first
                     table = page.locator("table.adv-table").first
-                    row_num_col.wait_for(state="visible", timeout=10000)
+                    table.wait_for(state="visible", timeout=30000)
                     # Scrape while the leading ranked rows and Total row are
                     # still mounted. Scrolling can virtualize those rows away.
                     traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
-                    # GA4 renders only the currently exposed portion of long tables.
-                    # Match the proven Countries/Pages capture sequence so the
-                    # ranked channel rows are rendered before measuring the table.
-                    page.keyboard.press("End")
-                    page.wait_for_timeout(1000)
-                    page.mouse.wheel(0, 3000)
-                    page.wait_for_timeout(1000)
-                    start_box = row_num_col.bounding_box()
-                    end_box = end_col.bounding_box()
-                    table_box = table.bounding_box()
-                    clip = {
-                        "x": start_box["x"],
-                        "y": table_box["y"],
-                        "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                        "height": table_box["height"],
-                    }
                     path = out_dir / "traffic_acquisition_table.png"
-                    page.screenshot(path=str(path), clip=clip, full_page=True)
+                    # Capture the table element itself. GA4 properties can expose
+                    # different metric columns, so fixed start/end header selectors
+                    # can crop the wrong data or time out entirely.
+                    table.screenshot(path=str(path))
                     screenshots["traffic_acquisition_table"] = path
 
                     page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
@@ -2137,10 +2172,16 @@ def _traffic_acquisition_paras(rows: list[dict], totals: dict) -> tuple[str, str
     top = rows[0]
     second = rows[1] if len(rows) > 1 else None
 
+    def _percentage(value: str) -> float:
+        try:
+            return float(str(value).strip().rstrip("%"))
+        except (TypeError, ValueError):
+            return 0.0
+
     raw_subtitle = (
         f"{top['source_medium']}"
         + (f" and {second['source_medium']}" if second else "")
-        + f" lead Traffic Acquisition engagement with {top['sessions_pct']}"
+        + f" drove the largest shares of website sessions at {top['sessions_pct']}"
         + (f" and {second['sessions_pct']}" if second else "")
         + " respectively"
     )
@@ -2152,10 +2193,15 @@ def _traffic_acquisition_paras(rows: list[dict], totals: dict) -> tuple[str, str
     )
 
     if second:
+        second_quality = (
+            "stronger interaction than the leading source"
+            if _percentage(second["engagement_rate"]) > _percentage(top["engagement_rate"])
+            else "more limited interaction than the leading source"
+        )
         raw_para2 = (
-            f"{second['source_medium']} is the second-largest source with {second['sessions']:,} sessions, "
-            f"but its {second['engagement_rate']} engagement rate and {second['avg_engagement_time']} average "
-            f"engagement time indicate limited interaction relative to its traffic volume."
+            f"{second['source_medium']} ranked second with {second['sessions']:,} sessions "
+            f"({second['sessions_pct']}). Its {second['engagement_rate']} engagement rate and "
+            f"{second['avg_engagement_time']} average engagement time indicate {second_quality}."
         )
     else:
         raw_para2 = "No secondary traffic source was recorded with comparable volume during this period."
@@ -2489,44 +2535,80 @@ def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
     totals: dict = {}
 
     table = page.locator("table.adv-table").first
-    table_rows = table.locator("tr")
+    table_rows = table.locator("tbody tr")
 
     def primary_value(cell_text: str) -> str:
         return next(
             (part.strip() for part in cell_text.splitlines() if part.strip()), ""
         )
 
+    header_cells = table.locator("thead th")
+    headers = [
+        re.sub(r"\s+", " ", primary_value(header_cells.nth(i).inner_text())).strip().casefold()
+        for i in range(header_cells.count())
+    ]
+
+    def column_index(*labels: str) -> int | None:
+        for index, header in enumerate(headers):
+            if any(header == label for label in labels):
+                return index
+        for index, header in enumerate(headers):
+            if any(header.startswith(label) for label in labels):
+                return index
+        return None
+
+    indexes = {
+        "source_medium": column_index("session source / medium", "session source/medium"),
+        "sessions": column_index("sessions"),
+        "engaged_sessions": column_index("engaged sessions"),
+        "engagement_rate": column_index("engagement rate"),
+        "avg_engagement_time": column_index("average engagement time per session", "avg. engagement time per session"),
+        "events_per_session": column_index("events per session"),
+    }
+
+    def value_at(values: list[str], key: str) -> str:
+        index = indexes[key]
+        return values[index] if index is not None and index < len(values) else ""
+
+    def count_value(value: str) -> int:
+        match = re.match(r"^([\d,]+)", value)
+        return int(match.group(1).replace(",", "")) if match else 0
+
+    def percentage_value(value: str) -> str:
+        match = re.search(r"[\d.]+%", value)
+        return match.group(0) if match else value
+
     for row_index in range(min(table_rows.count(), 20)):
         cells = table_rows.nth(row_index).locator("th, td")
         values = [primary_value(cells.nth(i).inner_text()) for i in range(cells.count())]
-        values = [value for value in values if value]
-        if not values:
+        if not any(values):
             continue
 
         if "Total" in values:
-            total_index = values.index("Total")
-            metric_values = values[total_index + 1:]
-            if len(metric_values) >= 5:
-                try:
-                    totals = {
-                        "sessions": int(metric_values[0].replace(",", "")),
-                        "engaged_sessions": int(metric_values[1].replace(",", "")),
-                        "engagement_rate": metric_values[2],
-                        "avg_engagement_time": metric_values[3],
-                        "events_per_session": metric_values[4],
-                    }
-                except ValueError:
-                    totals = {}
+            totals = {
+                "sessions": count_value(value_at(values, "sessions")),
+                "engaged_sessions": count_value(value_at(values, "engaged_sessions")),
+                "engagement_rate": percentage_value(value_at(values, "engagement_rate")),
+                "avg_engagement_time": value_at(values, "avg_engagement_time"),
+                "events_per_session": value_at(values, "events_per_session"),
+            }
             continue
 
-        numeric_index = next(
-            (i for i, value in enumerate(values[:2]) if value.isdigit()), None
-        )
-        if numeric_index is None:
+        source_medium = value_at(values, "source_medium")
+        sessions_value = value_at(values, "sessions")
+        engaged_value = value_at(values, "engaged_sessions")
+        if not source_medium or not sessions_value:
             continue
-        parsed = _parse_traffic_acquisition_row("\t".join(values[numeric_index:]))
-        if parsed:
-            rows.append(parsed)
+        rows.append({
+            "source_medium": source_medium,
+            "sessions": count_value(sessions_value),
+            "sessions_pct": percentage_value(sessions_value),
+            "engaged_sessions": count_value(engaged_value),
+            "engaged_sessions_pct": percentage_value(engaged_value),
+            "engagement_rate": percentage_value(value_at(values, "engagement_rate")),
+            "avg_engagement_time": value_at(values, "avg_engagement_time"),
+            "events_per_session": value_at(values, "events_per_session"),
+        })
 
     logger.info(
         "[2026] Scraped %d Traffic Acquisition rows; totals=%s",
@@ -2553,12 +2635,36 @@ def _open_traffic_acquisition_report(page, report_name: str, snapshot_url: str):
     match an unrelated/hidden text node elsewhere on the page (intercepted by
     a `.tree-branch` element from the GA4 left-nav), causing click timeouts.
     """
-    page = _goto_snapshot_explorer(page, report_name, snapshot_url, "traffic_acquisition")
-    page.wait_for_timeout(3000)
+    last_error: Exception | None = None
+    for attempt in range(1, 3):
+        try:
+            page = _goto_snapshot_explorer(
+                page, report_name, snapshot_url, "traffic_acquisition"
+            )
+            page.wait_for_timeout(3000)
+            _dismiss_playwright_overlays(page)
+            page.locator("table.adv-table").first.wait_for(
+                state="visible", timeout=30000
+            )
+            page.locator("th.cdk-column-__row_index__").first.wait_for(
+                state="visible", timeout=15000
+            )
+            page.locator("table.adv-table thead th").filter(
+                has_text=re.compile(r"Session source\s*/\s*medium", re.I)
+            ).first.wait_for(state="visible", timeout=30000)
+            return page
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "[2026] Traffic Acquisition table unavailable for %s on attempt %s: %s",
+                report_name,
+                attempt,
+                exc,
+            )
 
-    _dismiss_playwright_overlays(page)
-    page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
-    return page
+    raise RuntimeError(
+        f"Traffic Acquisition table did not render for {report_name} after retries."
+    ) from last_error
 
 
 def _scrape_pages_table(page) -> tuple[dict, list[dict], int]:
