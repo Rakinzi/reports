@@ -1042,7 +1042,15 @@ def _return_to_snapshot_dashboard(page, report_name: str, snapshot_url: str):
                 timeout=35000,
             )
             _ensure_expected_ga4_property(page, report_name)
-            page.locator("ga-card[data-guidedhelpid='summary']").first.wait_for(state="visible", timeout=15000)
+            # Some GA4 properties have no visible snapshot summary card or CTA.
+            # The dated reporting-hub route is sufficient because Countries,
+            # Pages, and Traffic Acquisition are opened via direct explorer URLs.
+            page.locator("body").wait_for(state="visible", timeout=5000)
+            if page.locator("ga-card[data-guidedhelpid='summary']").count() == 0:
+                logger.info(
+                    "[2026] Snapshot summary card unavailable for %s; continuing with direct explorer navigation",
+                    report_name,
+                )
             return page
         except Exception as e:
             last_error = e
@@ -1065,6 +1073,21 @@ def _ga4_snapshot_params(snapshot_url: str) -> str:
     fragment_query = urlsplit(snapshot_url).fragment.partition("?")[2]
     query_params = dict(parse_qsl(fragment_query, keep_blank_values=True))
     return query_params.get("params", "")
+
+
+def _ga4_dated_snapshot_url(snapshot_url: str, expected_start: str, expected_end: str) -> str:
+    """Return a snapshot URL with an explicit date range instead of a GA4 preset."""
+    nested_params = dict(
+        parse_qsl(_ga4_snapshot_params(snapshot_url), keep_blank_values=True)
+    )
+    nested_params.pop("_u.dateOption", None)
+    nested_params["_u.comparisonOption"] = "disabled"
+    nested_params["_u.date00"] = expected_start
+    nested_params["_u.date01"] = expected_end
+    return _with_ga4_fragment_query_params(
+        snapshot_url,
+        {"params": urlencode(nested_params)},
+    )
 
 
 def _ga4_explorer_url(snapshot_url: str, report_kind: str) -> str:
@@ -1514,7 +1537,7 @@ def _replace_picture_with_fallback(
 
 
 # Per-template picture name for the KPI card slot on Slide 1 (right-side image).
-# "Picture 11" is always the footer logo — the KPI card is the other right-side picture.
+# Shape names are template-specific; Mimosa legitimately uses ``Picture 11``.
 _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
     "econet":       "Picture 15",
     "econet_ai":    "Picture 10",
@@ -1525,7 +1548,7 @@ _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
     "cancer_serve": "Picture 9",
     "dicomm":       "Picture 10",
     "delta":        "Picture 12",
-    "bancabc":      "Picture 10",
+    "bancabc":      "Picture 12",
     "mimosa":       "Picture 11",
 }
 
@@ -1539,7 +1562,7 @@ _SLIDE3_SNAPSHOT_CARD_PICTURE: dict[str, str] = {
     "cancer_serve": "Picture 19",
     "dicomm":       "Picture 19",
     "delta":        "Picture 19",
-    "bancabc":      "Picture 20",
+    "bancabc":      "Picture 19",
     "mimosa":       "Picture 21",
 }
 
@@ -1553,7 +1576,7 @@ _SLIDE4_COUNTRIES_TABLE_PICTURE: dict[str, str] = {
     "cancer_serve": "Picture 10",
     "dicomm":       "Picture 10",
     "delta":        "Picture 9",
-    "bancabc":      "Picture 10",
+    "bancabc":      "Picture 9",
     "mimosa":       "Picture 2",
 }
 
@@ -1567,7 +1590,7 @@ _SLIDE5_PAGES_TABLE_PICTURE: dict[str, str] = {
     "cancer_serve": "Picture 11",
     "dicomm":       "Picture 11",
     "delta":        "Picture 7",
-    "bancabc":      "Picture 10",
+    "bancabc":      "Picture 6",
     "mimosa":       "Picture 5",
 }
 
@@ -1579,12 +1602,12 @@ _SLIDE6_SEARCH_CONSOLE_PICTURE: dict[str, str] = {
     "ecosure":      "Picture 9",
     "cancer_serve": "Picture 9",
     "delta":        "Picture 8",
-    "bancabc":      "Picture 9",
+    "bancabc":      "Picture 8",
     "mimosa":       "Picture 9",
 }
 
 _TOP_QUERIES_PICTURE: dict[str, str] = {
-    "bancabc":      "Picture 1",
+    "bancabc":      "Picture 13",
     "cancer_serve": "Picture 1",
     "delta":        "Picture 17",
     "ecocash":      "Picture 1",
@@ -1596,7 +1619,7 @@ _TOP_QUERIES_PICTURE: dict[str, str] = {
 }
 
 _SECURITY_HEADERS_PICTURE: dict[str, str] = {
-    "bancabc":   "Picture 14",
+    "bancabc":   "Picture 6",
     "delta":     "Picture 12",
     "dicomm":    "Picture 2",
     "ecocash":   "Picture 18",
@@ -1610,6 +1633,7 @@ _SECURITY_HEADERS_PICTURE: dict[str, str] = {
 _SLIDE_TRAFFIC_ACQ_PICTURE: dict[str, str] = {
     report_name: "Picture 32" for report_name in TEMPLATES_2026
 }
+_SLIDE_TRAFFIC_ACQ_PICTURE["bancabc"] = "Picture 21"
 
 
 _SLIDE3_NARRATIVE_SHAPE: dict[str, str] = {
@@ -1684,7 +1708,7 @@ def _build_slide1(slide, performance_month: str, screenshots: dict, report_name:
             screenshots["snapshot_card"],
             candidate_names=(pic_name,) if pic_name else (),
             min_left_emu=5 * 914400,
-            exclude_names={"Picture 11"},
+            exclude_names={"Picture 11"} if pic_name != "Picture 11" else set(),
             slot_label=f"{report_name} slide 1 KPI card",
         )
 
@@ -2367,17 +2391,24 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.get_by_role("button", name="Apply").click()
     expected_start = _dt.strptime(start_date, "%b %d, %Y").strftime("%Y%m%d")
     expected_end = _dt.strptime(end_date, "%b %d, %Y").strftime("%Y%m%d")
-    page.wait_for_function(
-        """
-        ({ expectedStart, expectedEnd }) => {
-            const href = window.location.href;
-            return href.includes(`date00%3D${expectedStart}`) &&
-                   href.includes(`date01%3D${expectedEnd}`);
-        }
-        """,
-        arg={"expectedStart": expected_start, "expectedEnd": expected_end},
-        timeout=20000,
+    page.wait_for_timeout(2500)
+
+    # GA4 occasionally ignores Custom and rewrites the URL back to
+    # ``dateOption=last28Days``. In that case, force the equivalent explicit
+    # dated reporting-hub URL rather than waiting until the job times out.
+    expected_tokens = (
+        f"date00%3D{expected_start}",
+        f"date01%3D{expected_end}",
     )
+    if not all(token in page.url for token in expected_tokens):
+        route_url = page.url if "/reports/" in page.url else snapshot_url
+        dated_url = _ga4_dated_snapshot_url(route_url, expected_start, expected_end)
+        logger.warning(
+            "[2026] GA4 did not retain Custom dates; forcing dated snapshot URL: %s",
+            dated_url,
+        )
+        page.goto(dated_url, wait_until="domcontentloaded", timeout=30000)
+
     page = _restore_snapshot_route_after_date_apply(page, report_name, snapshot_url)
     page.wait_for_function(
         """

@@ -570,7 +570,7 @@ def _capture_gsc_dimension_table(
 
 
 def _capture_security_headers(page, site_url: str, out_path: Path) -> Path:
-    """Scan a website on SecurityHeaders.com and capture the visible results viewport."""
+    """Scan a website and capture only its Security Report Summary card."""
     page.goto("https://securityheaders.com/", wait_until="domcontentloaded", timeout=30000)
 
     url_input = page.locator('input[name="q"]')
@@ -584,12 +584,22 @@ def _capture_security_headers(page, site_url: str, out_path: Path) -> Path:
     submit.click()
 
     page.wait_for_url(lambda url: "?q=" in url, timeout=120000)
-    page.get_by_text("Security Report Summary", exact=True).wait_for(
-        state="visible", timeout=120000
-    )
+    summary_heading = page.get_by_text("Security Report Summary", exact=True)
+    summary_heading.wait_for(state="visible", timeout=120000)
     page.wait_for_timeout(1500)
-    page.evaluate("window.scrollTo(0, 0)")
-    page.screenshot(path=str(out_path), full_page=False)
+
+    # Select the smallest ancestor that contains the complete report-summary
+    # fields. This excludes the scan form, Warnings, Raw Headers, and footer.
+    summary_card = summary_heading.locator(
+        "xpath=ancestor::*[contains(normalize-space(.), 'Site:') "
+        "and contains(normalize-space(.), 'IP Address:') "
+        "and contains(normalize-space(.), 'Report Time:') "
+        "and contains(normalize-space(.), 'Headers:')][1]"
+    )
+    summary_card.wait_for(state="visible", timeout=15000)
+    summary_card.scroll_into_view_if_needed()
+    page.wait_for_timeout(500)
+    summary_card.screenshot(path=str(out_path))
     return out_path
 
 

@@ -95,6 +95,7 @@
 	let slide1Name = $state('');
 	let slide1LogoDataUrl = $state('');
 	let slide1LogoFileName = $state('');
+	let redoingReportId = $state<number | null>(null);
 
 	let quickOpen = $state(false);
 	let quickGenerating = $state(false);
@@ -276,30 +277,72 @@
 		}
 	}
 
-	function retryReport(report: Report) {
-		// Parse "1 March 2026 - 30 April 2026" back to YYYY-MM-DD for the date inputs.
-		// Use local date components (not toISOString which is UTC) to avoid timezone off-by-one.
-		const toLocalISO = (s: string) => {
-			const d = new Date(s + ' 00:00:00');
-			if (isNaN(d.getTime())) return '';
-			const y = d.getFullYear();
-			const m = String(d.getMonth() + 1).padStart(2, '0');
-			const day = String(d.getDate()).padStart(2, '0');
-			return `${y}-${m}-${day}`;
-		};
+	// Parse report dates back to local YYYY-MM-DD without UTC offset shifts.
+	function toLocalISO(s: string) {
+		const d = new Date(s + ' 00:00:00');
+		if (isNaN(d.getTime())) return '';
+		const y = d.getFullYear();
+		const m = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${y}-${m}-${day}`;
+	}
+
+	function reportDateParts(report: Report) {
 		const parts = report.date_range.split(' - ');
-		if (parts.length === 2) {
-			startDateRaw = toLocalISO(parts[0].trim());
-			endDateRaw = toLocalISO(parts[1].trim());
-		}
+		return {
+			startRaw: parts.length === 2 ? toLocalISO(parts[0].trim()) : '',
+			endRaw: parts.length === 2 ? toLocalISO(parts[1].trim()) : '',
+			reportRaw: toLocalISO(report.report_date)
+		};
+	}
+
+	function retryReport(report: Report) {
+		const dates = reportDateParts(report);
+		startDateRaw = dates.startRaw;
+		endDateRaw = dates.endRaw;
 		// Parse "03 March 2026" back to YYYY-MM-DD
-		reportDateRaw = toLocalISO(report.report_date);
+		reportDateRaw = dates.reportRaw;
 		reportName = report.report_name;
 		slide1Name = '';
 		slide1LogoDataUrl = '';
 		slide1LogoFileName = '';
 		generateError = '';
 		generateOpen = true;
+	}
+
+	async function redoReport(report: Report) {
+		const dates = reportDateParts(report);
+		if (!dates.startRaw || !dates.endRaw || !dates.reportRaw) {
+			refreshError = 'Could not reuse this report’s dates.';
+			return;
+		}
+
+		redoingReportId = report.id;
+		refreshError = '';
+		try {
+			const option = reportOptions.find((item) => item.value === report.report_name);
+			const response = await fetchJson<{ id: number }>(apiBaseUrl, '/reports/generate', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					report_name: report.report_name,
+					date_range: report.date_range,
+					report_date: report.report_date,
+					start_date: toGA4Date(dates.startRaw),
+					end_date: toGA4Date(dates.endRaw),
+					slide1_source_name: option?.label ?? report.report_name,
+					slide1_name: '',
+					slide1_logo_data_url: '',
+					slide1_logo_filename: ''
+				})
+			});
+			await refreshReports();
+			pollReport(response.id);
+		} catch (error) {
+			refreshError = error instanceof Error ? error.message : 'Could not redo the report.';
+		} finally {
+			redoingReportId = null;
+		}
 	}
 
 	function handleLogoChange(event: Event) {
@@ -573,6 +616,22 @@
 										<TableCell class="text-right">
 											{#if report.status === 'completed' && report.output_path}
 												<div class="flex items-center justify-end gap-2">
+													{#if reportOptions.some((option) => option.value === report.report_name)}
+														<Button
+															size="sm"
+															variant="ghost"
+															disabled={redoingReportId === report.id}
+															onclick={() => void redoReport(report)}
+															title="Generate this report again with the same dates"
+														>
+															{#if redoingReportId === report.id}
+																<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
+															{:else}
+																<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
+															{/if}
+															Redo
+														</Button>
+													{/if}
 													<Button
 														size="sm"
 														variant="ghost"

@@ -1,0 +1,307 @@
+- generic [ref=f1e2]:
+  - generic [ref=f1e4]:
+    - link [ref=f1e6] [cursor=pointer]:
+      - /url: https://prbly.us/452gLAp
+      - img "The logo of our sponsor, Snyk API & Web." [ref=f1e7]
+    - navigation [ref=f1e8]:
+      - list:
+        - listitem [ref=f1e9]:
+          - link "Home" [ref=f1e10] [cursor=pointer]:
+            - /url: /
+        - listitem [ref=f1e11] [cursor=pointer]:
+          - generic [ref=f1e12]: About
+        - listitem [ref=f1e13] [cursor=pointer]:
+          - generic [ref=f1e14]: API
+    - banner [ref=f1e16]:
+      - heading "Scan your site now" [level=2] [ref=f1e17]
+      - generic [ref=f1e19]:
+        - generic [ref=f1e20]:
+          - textbox "Scan your site now" [ref=f1e21]:
+            - /placeholder: enter address here
+            - text: https://www.mimosa.co.zw/
+          - button "Scan" [ref=f1e22]
+        - generic [ref=f1e23]:
+          - checkbox "Hide results" [ref=f1e24]
+          - text: Hide results
+          - checkbox "Follow redirects" [checked] [ref=f1e25]
+          - text: Follow redirects
+  - generic [ref=f1e29]:
+    - generic [ref=f1e30]:
+      - generic [ref=f1e31]: Security Report Summary
+      - generic [ref=f1e33]:
+        - generic [ref=f1e34]: A+
+        - table [ref=f1e38]:
+          - rowgroup [ref=f1e42]:
+            - row [ref=f1e43]:
+              - rowheader "Site:" [ref=f1e44]
+              - cell [ref=f1e45]:
+                - link "https://www.mimosa.co.zw/" [ref=f1e46] [cursor=pointer]:
+                  - /url: https://www.mimosa.co.zw/
+            - row [ref=f1e47]:
+              - rowheader "IP Address:" [ref=f1e48]
+              - cell "104.18.28.197" [ref=f1e49]
+            - row [ref=f1e50]:
+              - rowheader "Report Time:" [ref=f1e51]
+              - cell "29 Jul 2026 07:02:30 UTC" [ref=f1e52]
+            - row [ref=f1e53]:
+              - rowheader "Headers:" [ref=f1e54]
+              - cell " X-Content-Type-Options  X-Frame-Options  Strict-Transport-Security  Content-Security-Policy  Referrer-Policy  Permissions-Policy" [ref=f1e55]:
+                - list [ref=f1e56]:
+                  - listitem [ref=f1e57]:
+                    - generic [ref=f1e58]: 
+                    - text: X-Content-Type-Options
+                  - listitem [ref=f1e59]:
+                    - generic [ref=f1e60]: 
+                    - text: X-Frame-Options
+                  - listitem [ref=f1e61]:
+                    - generic [ref=f1e62]: 
+                    - text: Strict-Transport-Security
+                  - listitem [ref=f1e63]:
+                    - generic [ref=f1e64]: 
+                    - text: Content-Security-Policy
+                  - listitem [ref=f1e65]:
+                    - generic [ref=f1e66]: 
+                    - text: Referrer-Policy
+                  - listitem [ref=f1e67]:
+                    - generic [ref=f1e68]: 
+                    - text: Permissions-Policy
+            - row [ref=f1e69]:
+              - rowheader "Advanced:" [ref=f1e70]
+              - cell [ref=f1e71]:
+                - table [ref=f1e72]:
+                  - rowgroup [ref=f1e73]:
+                    - row [ref=f1e74]:
+                      - cell "Wow, amazing grade! Perform a deeper security analysis of your website and APIs:" [ref=f1e75]
+                      - cell [ref=f1e76]:
+                        - link [ref=f1e77] [cursor=pointer]:
+                          - /url: https://probely.com/sh?utm_campaign=Security%20Headers&utm_source=Security%20Headers&utm_medium=Display&utm_content=A+
+                          - button "Try Now" [ref=f1e78]
+    - generic [ref=f1e79]:
+      - generic [ref=f1e80]: Warnings
+      - table [ref=f1e82]:
+        - rowgroup [ref=f1e86]:
+          - row [ref=f1e87]:
+            - rowheader "X-Frame-Options" [ref=f1e88]
+            - cell "There was a duplicate X-Frame-Options header." [ref=f1e89]
+    - generic [ref=f1e90]:
+      - generic [ref=f1e91]: Raw Headers
+      - table [ref=f1e93]:
+        - rowgroup [ref=f1e97]:
+          - row [ref=f1e98]:
+            - rowheader "HTTP/2" [ref=f1e99]
+            - cell "200" [ref=f1e100]
+          - row [ref=f1e101]:
+            - rowheader "date" [ref=f1e102]
+            - cell "Wed, 29 Jul 2026 07:02:29 GMT" [ref=f1e103]
+          - row [ref=f1e104]:
+            - rowheader "content-type" [ref=f1e105]
+            - cell "text/html; charset=UTF-8" [ref=f1e106]
+          - row [ref=f1e107]:
+            - rowheader "server" [ref=f1e108]
+            - cell "cloudflare" [ref=f1e109]
+          - row [ref=f1e110]:
+            - rowheader "link" [ref=f1e111]
+            - cell "<https://www.mimosa.co.zw>; rel=shortlink" [ref=f1e112]
+          - row [ref=f1e113]:
+            - rowheader "x-content-type-options" [ref=f1e114]
+            - cell [ref=f1e115]:
+              - strong [ref=f1e116]: nosniff
+          - row [ref=f1e117]:
+            - rowheader "x-frame-options" [ref=f1e118]
+            - cell [ref=f1e119]:
+              - strong [ref=f1e120]: SAMEORIGIN
+          - row [ref=f1e121]:
+            - rowheader "x-frame-options" [ref=f1e122]
+            - cell [ref=f1e123]:
+              - strong [ref=f1e124]: DENY
+          - row [ref=f1e125]:
+            - rowheader "access-control-allow-origin" [ref=f1e126]
+            - cell "*.investisdigital.com" [ref=f1e127]
+          - row [ref=f1e128]:
+            - rowheader "x-host" [ref=f1e129]
+            - cell "PRD-P83-1" [ref=f1e130]
+          - row [ref=f1e131]:
+            - rowheader "x-xss-protection" [ref=f1e132]
+            - cell "0" [ref=f1e133]
+          - row [ref=f1e134]:
+            - rowheader "strict-transport-security" [ref=f1e135]
+            - cell [ref=f1e136]:
+              - strong [ref=f1e137]: max-age
+              - text: =15552000;
+              - strong [ref=f1e138]: includeSubDomains
+              - text: ;
+              - strong [ref=f1e139]: preload
+          - row [ref=f1e140]:
+            - rowheader "content-security-policy" [ref=f1e141]
+            - cell [ref=f1e142]:
+              - strong [ref=f1e143]: frame-ancestors
+              - text: "'none'"
+          - row [ref=f1e144]:
+            - rowheader "referrer-policy" [ref=f1e145]
+            - cell [ref=f1e146]:
+              - strong [ref=f1e147]: no-referrer
+          - row [ref=f1e148]:
+            - rowheader "permissions-policy" [ref=f1e149]
+            - cell [ref=f1e150]:
+              - strong [ref=f1e151]: geolocation
+              - text: =(self),
+              - strong [ref=f1e152]: microphone
+              - text: =()
+          - row [ref=f1e153]:
+            - rowheader "x-permitted-cross-domain-policies" [ref=f1e154]
+            - cell "none" [ref=f1e155]
+          - row [ref=f1e156]:
+            - rowheader "cross-origin-resource-policy" [ref=f1e157]
+            - cell [ref=f1e158]:
+              - strong [ref=f1e159]: cross-origin
+          - row [ref=f1e160]:
+            - rowheader "cross-origin-embedder-policy" [ref=f1e161]
+            - cell "unsafe-none" [ref=f1e162]
+          - row [ref=f1e163]:
+            - rowheader "cross-origin-opener-policy" [ref=f1e164]
+            - cell "cross-origin" [ref=f1e165]
+          - row [ref=f1e166]:
+            - rowheader "cf-cache-status" [ref=f1e167]
+            - cell "DYNAMIC" [ref=f1e168]
+          - row [ref=f1e169]:
+            - rowheader "set-cookie" [ref=f1e170]
+            - cell [ref=f1e171]:
+              - text: __cf_bm=LipHwO3OkBeQwGrLO3EcIZxj09cCguqYO_V0zn3YOhc-1785308549.1419663-1.0.1.1-ymg_JtFXCYvRFbtcJdsjCSdg7Q9rIEzk5hYtMVsn3ZNk3z28r0zCwvVgFmMifZ_dGwiUO1IHIwLrnV8HzoaiLGHGGJiOA2Nvu4WVYUmBQLHt5PDNpIWfsr8ELnTahw_O;
+              - strong [ref=f1e172]: HttpOnly
+              - text: ;
+              - strong [ref=f1e173]: SameSite
+              - text: =None;
+              - strong [ref=f1e174]: Secure
+              - text: ; Path=/; Domain=mimosa.co.zw; Expires=Wed, 29 Jul 2026 07:32:29 GMT
+          - row [ref=f1e175]:
+            - rowheader "set-cookie" [ref=f1e176]
+            - cell [ref=f1e177]:
+              - text: _cfuvid=lCvur3mPb.zRzqRrKQdwAA0aUo5jscZy.5S5pGouskA-1785308549.1419663-1.0.1.1-bei0N4ZvezXR0m3CfxBIZAesxwYgyPtHmoB6LECYVrc;
+              - strong [ref=f1e178]: HttpOnly
+              - text: ;
+              - strong [ref=f1e179]: SameSite
+              - text: =None;
+              - strong [ref=f1e180]: Secure
+              - text: ; Path=/; Domain=mimosa.co.zw
+          - row [ref=f1e181]:
+            - rowheader "server-timing" [ref=f1e182]
+            - cell "cfCacheStatus;desc=\"DYNAMIC\"" [ref=f1e183]
+          - row [ref=f1e184]:
+            - rowheader "server-timing" [ref=f1e185]
+            - cell "cfEdge;dur=119,cfOrigin;dur=688" [ref=f1e186]
+          - row [ref=f1e187]:
+            - rowheader "content-encoding" [ref=f1e188]
+            - cell "gzip" [ref=f1e189]
+          - row [ref=f1e190]:
+            - rowheader "cf-ray" [ref=f1e191]
+            - cell "a22a42202adb38d8-DUB" [ref=f1e192]
+    - generic [ref=f1e193]:
+      - generic [ref=f1e194]: Additional Information
+      - table [ref=f1e196]:
+        - rowgroup [ref=f1e200]:
+          - row [ref=f1e201]:
+            - rowheader "server" [ref=f1e202]
+            - cell [ref=f1e203]:
+              - link "Server" [ref=f1e204] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hardening-your-http-response-headers/#server
+              - text: value has been changed. Typically you will see values like "Microsoft-IIS/8.0" or "nginx 1.7.2".
+          - row [ref=f1e205]:
+            - rowheader "x-content-type-options" [ref=f1e206]
+            - cell [ref=f1e207]:
+              - link "X-Content-Type-Options" [ref=f1e208] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hardening-your-http-response-headers/#x-content-type-options
+              - text: "stops a browser from trying to MIME-sniff the content type and forces it to stick with the declared content-type. The only valid value for this header is \"X-Content-Type-Options: nosniff\"."
+          - row [ref=f1e209]:
+            - rowheader "x-frame-options" [ref=f1e210]
+            - cell [ref=f1e211]:
+              - link "X-Frame-Options" [ref=f1e212] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hardening-your-http-response-headers/#x-frame-options
+              - text: tells the browser whether you want to allow your site to be framed or not. By preventing a browser from framing your site you can defend against attacks like clickjacking.
+          - row [ref=f1e213]:
+            - rowheader "x-frame-options" [ref=f1e214]
+            - cell [ref=f1e215]:
+              - link "X-Frame-Options" [ref=f1e216] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hardening-your-http-response-headers/#x-frame-options
+              - text: tells the browser whether you want to allow your site to be framed or not. By preventing a browser from framing your site you can defend against attacks like clickjacking.
+          - row [ref=f1e217]:
+            - rowheader "access-control-allow-origin" [ref=f1e218]
+            - cell "The Access-Control-Allow-Origin header is used to configure CORS." [ref=f1e219]
+          - row [ref=f1e220]:
+            - rowheader "x-xss-protection" [ref=f1e221]
+            - cell [ref=f1e222]:
+              - link "X-XSS-Protection" [ref=f1e223] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hardening-your-http-response-headers/#x-xss-protection
+              - text: "sets the configuration for the XSS Auditor built into older browsers. The recommended value was \"X-XSS-Protection: 1; mode=block\" but you should now look at"
+              - link "Content Security Policy" [ref=f1e224] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/content-security-policy-an-introduction/
+              - text: instead.
+          - row [ref=f1e225]:
+            - rowheader "strict-transport-security" [ref=f1e226]
+            - cell [ref=f1e227]:
+              - link "HTTP Strict Transport Security" [ref=f1e228] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/hsts-the-missing-link-in-tls/
+              - text: is an excellent feature to support on your site and strengthens your implementation of TLS by getting the User Agent to enforce the use of HTTPS.
+          - row [ref=f1e229]:
+            - rowheader "content-security-policy" [ref=f1e230]
+            - cell [ref=f1e231]:
+              - link "Content Security Policy" [ref=f1e232] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/content-security-policy-an-introduction/
+              - text: is an effective measure to protect your site from XSS attacks. By whitelisting sources of approved content, you can prevent the browser from loading malicious assets.
+              - link "Analyse" [ref=f1e233] [cursor=pointer]:
+                - /url: https://report-uri.com/home/analyse/https%3A%2F%2Fwww.mimosa.co.zw%2F
+              - text: this policy in more detail. You can sign up for a free account on
+              - link "Report URI" [ref=f1e234] [cursor=pointer]:
+                - /url: https://report-uri.com
+              - text: to collect reports about problems on your site.
+          - row [ref=f1e235]:
+            - rowheader "referrer-policy" [ref=f1e236]
+            - cell [ref=f1e237]:
+              - link "Referrer Policy" [ref=f1e238] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/a-new-security-header-referrer-policy/
+              - text: is a new header that allows a site to control how much information the browser includes with navigations away from a document and should be set by all sites.
+          - row [ref=f1e239]:
+            - rowheader "permissions-policy" [ref=f1e240]
+            - cell [ref=f1e241]:
+              - link "Permissions Policy" [ref=f1e242] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/goodbye-feature-policy-and-hello-permissions-policy/
+              - text: is a new header that allows a site to control which features and APIs can be used in the browser.
+          - row [ref=f1e243]:
+            - rowheader "cross-origin-resource-policy" [ref=f1e244]
+            - cell [ref=f1e245]:
+              - link "Cross-Origin Resource Policy" [ref=f1e246] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/coop-and-coep/
+              - text: allows a resource owner to specify who can load the resource.
+          - row [ref=f1e247]:
+            - rowheader "cross-origin-embedder-policy" [ref=f1e248]
+            - cell [ref=f1e249]:
+              - link "Cross-Origin Embedder Policy" [ref=f1e250] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/coop-and-coep/
+              - text: allows a site to prevent assets being loaded that do not grant permission to load them via CORS or CORP.
+          - row [ref=f1e251]:
+            - rowheader "cross-origin-opener-policy" [ref=f1e252]
+            - cell [ref=f1e253]:
+              - link "Cross-Origin Opener Policy" [ref=f1e254] [cursor=pointer]:
+                - /url: https://scotthelme.co.uk/coop-and-coep/
+              - text: allows a site to opt-in to Cross-Origin Isolation in the browser.
+  - generic [ref=f1e257]:
+    - generic [ref=f1e259]:
+      - text: A
+      - link "snyk.io" [ref=f1e260] [cursor=pointer]:
+        - /url: https://snyk.io
+      - text: project -
+      - link "CC-BY-SA 4.0" [ref=f1e261] [cursor=pointer]:
+        - /url: https://creativecommons.org/licenses/by-sa/4.0/deed.en_GB
+    - generic [ref=f1e263]:
+      - text: Powered by
+      - link "Snyk" [ref=f1e264] [cursor=pointer]:
+        - /url: https://snyk.io
+    - list [ref=f1e266]:
+      - listitem [ref=f1e267]:
+        - link "" [ref=f1e268] [cursor=pointer]:
+          - /url: https://twitter.com/securityheaders
+      - listitem [ref=f1e269]:
+        - link "" [ref=f1e270] [cursor=pointer]:
+          - /url: https://www.facebook.com/secheaders/
+      - listitem [ref=f1e271]:
+        - link "" [ref=f1e272] [cursor=pointer]:
+          - /url: mailto:info@securityheaders.com

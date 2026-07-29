@@ -12,6 +12,7 @@ from reports.generator_2026 import (
     _TOP_QUERIES_PICTURE,
     _SECURITY_HEADERS_PICTURE,
     _find_slide_index,
+    _ga4_dated_snapshot_url,
     _build_overview_slide,
     _build_slide_traffic_acquisition,
     _clear_recommendations_slide,
@@ -22,6 +23,18 @@ from reports.generator_2026 import (
     _traffic_acquisition_paras,
     get_templates_dir,
 )
+
+
+def test_ga4_dated_snapshot_url_replaces_last_28_days_preset():
+    url = (
+        "https://analytics.google.com/analytics/web/#/a50307504p534956270/reports/reportinghub"
+        "?params=_u.dateOption%3Dlast28Days%26_u.comparisonOption%3Ddisabled"
+    )
+    dated = _ga4_dated_snapshot_url(url, "20260701", "20260728")
+
+    assert "dateOption%3Dlast28Days" not in dated
+    assert "date00%3D20260701" in dated
+    assert "date01%3D20260728" in dated
 
 
 def test_finds_mandatory_traffic_acquisition_slide_in_infraco_template():

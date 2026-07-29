@@ -1,0 +1,227 @@
+- generic [ref=e217]:
+  - generic [ref=e3]:
+    - link [ref=e5] [cursor=pointer]:
+      - /url: /
+      - img "The logo of our sponsor, Snyk API & Web." [ref=e6]
+    - navigation [ref=e7]:
+      - list:
+        - listitem [ref=e8]:
+          - link "Home" [ref=e9] [cursor=pointer]:
+            - /url: /
+        - listitem [ref=e10] [cursor=pointer]:
+          - generic [ref=e11]: About
+        - listitem [ref=e12] [cursor=pointer]:
+          - generic [ref=e13]: API
+    - banner [ref=e15]:
+      - heading "Scan your site now" [level=2] [ref=e16]
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - textbox "Scan your site now" [ref=e20]:
+            - /placeholder: enter address here
+          - button "Scan" [ref=e21]
+        - generic [ref=e22]:
+          - checkbox "Hide results" [ref=e23]
+          - text: Hide results
+          - checkbox "Follow redirects" [checked] [ref=e24]
+          - text: Follow redirects
+  - generic [ref=e27]:
+    - generic [ref=e29]:
+      - generic [ref=e30]: Grand Totals
+      - table [ref=e32]:
+        - rowgroup [ref=e36]:
+          - row [ref=e37]:
+            - rowheader "A+" [ref=e38]
+            - cell "8,895,764" [ref=e39]
+          - row [ref=e40]:
+            - rowheader "A" [ref=e41]
+            - cell "41,837,389" [ref=e42]
+          - row [ref=e43]:
+            - rowheader "B" [ref=e44]
+            - cell "19,396,451" [ref=e45]
+          - row [ref=e46]:
+            - rowheader "C" [ref=e47]
+            - cell "18,798,155" [ref=e48]
+          - row [ref=e49]:
+            - rowheader "D" [ref=e50]
+            - cell "53,054,227" [ref=e51]
+          - row [ref=e52]:
+            - rowheader "E" [ref=e53]
+            - cell "9,657,199" [ref=e54]
+          - row [ref=e55]:
+            - rowheader "F" [ref=e56]
+            - cell "169,448,880" [ref=e57]
+          - row [ref=e58]:
+            - rowheader "R" [ref=e59]
+            - cell "61,524,645" [ref=e60]
+          - row [ref=e61]:
+            - rowheader "Total" [ref=e62]
+            - cell "382,612,710" [ref=e63]
+    - generic [ref=e65]:
+      - generic [ref=e66]: Recent Scans
+      - table [ref=e68]:
+        - rowgroup [ref=e72]:
+          - row [ref=e73]:
+            - rowheader [ref=e74]:
+              - link "www.digwow.net" [ref=e75] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fwww.digwow.net%2Fpost%2F0141304079%2F
+            - cell "F" [ref=e76]
+          - row [ref=e77]:
+            - rowheader [ref=e78]:
+              - link "ocbookingspace.ver..." [ref=e79] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Focbookingspace.vercel.app%2F
+            - cell "D" [ref=e80]
+          - row [ref=e81]:
+            - rowheader [ref=e82]:
+              - link "fafa178thb.com" [ref=e83] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Ffafa178thb.com%2F
+            - cell "C" [ref=e84]
+          - row [ref=e85]:
+            - rowheader [ref=e86]:
+              - link "idcssa-dsm-wdinbou..." [ref=e87] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fidcssa-dsm-wdinboundfn-preprod.ciostage.accenture.com%2F
+            - cell "A" [ref=e88]
+          - row [ref=e89]:
+            - rowheader [ref=e90]:
+              - link "www.iliiili.com" [ref=e91] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fwww.iliiili.com%2Fpost%2F0967213854%2F
+            - cell "A" [ref=e92]
+          - row [ref=e93]:
+            - rowheader [ref=e94]:
+              - link "alshaya.com.tr" [ref=e95] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Falshaya.com.tr%2F
+            - cell "A+" [ref=e96]
+          - row [ref=e97]:
+            - rowheader [ref=e98]:
+              - link "seo-tip.com" [ref=e99] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fseo-tip.com%2Fdomain.php%3Fpart%3D115705117
+            - cell "F" [ref=e100]
+          - row [ref=e101]:
+            - rowheader [ref=e102]:
+              - link "blog-7923154860.il..." [ref=e103] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fblog-7923154860.iliiili.com%2Fpost%2F7923154860
+            - cell "A" [ref=e104]
+          - row [ref=e105]:
+            - rowheader [ref=e106]:
+              - link "seol.store" [ref=e107] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fseol.store%2Fdomain%2Fdomain%2Fpart%2F225513
+            - cell "F" [ref=e108]
+    - generic [ref=e110]:
+      - generic [ref=e111]: Hall of Fame
+      - table [ref=e113]:
+        - rowgroup [ref=e117]:
+          - row [ref=e118]:
+            - rowheader [ref=e119]:
+              - link "idcssa-dsm-wdinbou..." [ref=e120] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fidcssa-dsm-wdinboundfn-preprod.ciostage.accenture.com%2F
+            - cell "A" [ref=e121]
+          - row [ref=e122]:
+            - rowheader [ref=e123]:
+              - link "alshaya.com.tr" [ref=e124] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Falshaya.com.tr%2F
+            - cell "A+" [ref=e125]
+          - row [ref=e126]:
+            - rowheader [ref=e127]:
+              - link "blog-8305961724.il..." [ref=e128] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fblog-8305961724.iliiili.com%2Fpost%2F8305961724%2F%C3%97tamp%3D1728150241
+            - cell "A" [ref=e129]
+          - row [ref=e130]:
+            - rowheader [ref=e131]:
+              - link "blog-7923154860.il..." [ref=e132] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fblog-7923154860.iliiili.com%2Fpost%2F7923154860
+            - cell "A" [ref=e133]
+          - row [ref=e134]:
+            - rowheader [ref=e135]:
+              - link "tender247.ai" [ref=e136] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Ftender247.ai%2Flogin
+            - cell "A" [ref=e137]
+          - row [ref=e138]:
+            - rowheader [ref=e139]:
+              - link "915.groww.in" [ref=e140] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2F915.groww.in%2F
+            - cell "A" [ref=e141]
+          - row [ref=e142]:
+            - rowheader [ref=e143]:
+              - link "www.iliiili.com" [ref=e144] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fwww.iliiili.com%2Fpost%2F7096532814%2F
+            - cell "A" [ref=e145]
+          - row [ref=e146]:
+            - rowheader [ref=e147]:
+              - link "bahceyakaegitim.co..." [ref=e148] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fbahceyakaegitim.com%2F
+            - cell "A" [ref=e149]
+          - row [ref=e150]:
+            - rowheader [ref=e151]:
+              - link "my-moto.vercel.app" [ref=e152] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fmy-moto.vercel.app%2Flogin
+            - cell "A+" [ref=e153]
+    - generic [ref=e155]:
+      - generic [ref=e156]: Hall of Shame
+      - table [ref=e158]:
+        - rowgroup [ref=e162]:
+          - row [ref=e163]:
+            - rowheader [ref=e164]:
+              - link "www.aayyy.com" [ref=e165] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fwww.aayyy.com%2F
+            - cell "F" [ref=e166]
+          - row [ref=e167]:
+            - rowheader [ref=e168]:
+              - link "seo-tip.com" [ref=e169] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fseo-tip.com%2Fdomain.php%3Fpart%3D113804185
+            - cell "F" [ref=e170]
+          - row [ref=e171]:
+            - rowheader [ref=e172]:
+              - link "takes.homes" [ref=e173] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Ftakes.homes%2Fdomain%2Fdomain%2Fpart%2F51891
+            - cell "F" [ref=e174]
+          - row [ref=e175]:
+            - rowheader [ref=e176]:
+              - link "blinks.monster" [ref=e177] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fblinks.monster%2Fdomain%2Fdomain%2Fpart%2F84752
+            - cell "F" [ref=e178]
+          - row [ref=e179]:
+            - rowheader [ref=e180]:
+              - link "knows.sbs" [ref=e181] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fknows.sbs%2Fdomain%2Fdomain%2Fpart%2F79563
+            - cell "F" [ref=e182]
+          - row [ref=e183]:
+            - rowheader [ref=e184]:
+              - link "seol.store" [ref=e185] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fseol.store%2Fdomain%2Fdomain%2Fpart%2F6862
+            - cell "F" [ref=e186]
+          - row [ref=e187]:
+            - rowheader [ref=e188]:
+              - link "knows.monster" [ref=e189] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=http%3A%2F%2Fknows.monster%2Fdomain%2Fdomain%2Fpart%2F108688
+            - cell "F" [ref=e190]
+          - row [ref=e191]:
+            - rowheader [ref=e192]:
+              - link "www.digwow.net" [ref=e193] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fwww.digwow.net%2Fpost%2F6581429073%2F
+            - cell "F" [ref=e194]
+          - row [ref=e195]:
+            - rowheader [ref=e196]:
+              - link "caneparealty.com" [ref=e197] [cursor=pointer]:
+                - /url: https://securityheaders.com/?q=https%3A%2F%2Fcaneparealty.com%2Findex.php%2Fagent%2Fmartybixby7101%2F
+            - cell "F" [ref=e198]
+  - generic [ref=e201]:
+    - generic [ref=e203]:
+      - text: A
+      - link "snyk.io" [ref=e204] [cursor=pointer]:
+        - /url: https://snyk.io
+      - text: project -
+      - link "CC-BY-SA 4.0" [ref=e205] [cursor=pointer]:
+        - /url: https://creativecommons.org/licenses/by-sa/4.0/deed.en_GB
+    - generic [ref=e207]:
+      - text: Powered by
+      - link "Snyk" [ref=e208] [cursor=pointer]:
+        - /url: https://snyk.io
+    - list [ref=e210]:
+      - listitem [ref=e211]:
+        - link "" [ref=e218] [cursor=pointer]:
+          - /url: https://twitter.com/securityheaders
+      - listitem [ref=e213]:
+        - link "" [ref=e219] [cursor=pointer]:
+          - /url: https://www.facebook.com/secheaders/
+      - listitem [ref=e215]:
+        - link "" [ref=e220] [cursor=pointer]:
+          - /url: mailto:info@securityheaders.com
