@@ -335,6 +335,33 @@ export async function uploadSlideImage(
 	});
 }
 
+// ---------------------------------------------------------------------------
+// PDF fillable-form API helpers
+// ---------------------------------------------------------------------------
+
+export async function makeFillablePdf(
+	apiBaseUrl: string,
+	file: File
+): Promise<{ blob: Blob; filename: string }> {
+	const form = new FormData();
+	form.append('file', file);
+	const res = await fetch(`${apiBaseUrl}/pdf/make-fillable`, { method: 'POST', body: form });
+	if (!res.ok) {
+		let detail = `Request failed: ${res.status}`;
+		try {
+			const b = await res.json();
+			if (b?.detail) detail = b.detail;
+		} catch {
+			/**/
+		}
+		throw new Error(detail);
+	}
+	const disposition = res.headers.get('content-disposition') ?? '';
+	const match = disposition.match(/filename="?([^"]+)"?/);
+	const filename = match?.[1] ?? file.name.replace(/\.pdf$/i, '-fillable.pdf');
+	return { blob: await res.blob(), filename };
+}
+
 export async function generateQuickReport(
 	apiBaseUrl: string,
 	body: QuickReportRequest

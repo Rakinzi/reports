@@ -12,7 +12,8 @@
 		Sun,
 		Moon,
 		Layers,
-		RefreshCw
+		RefreshCw,
+		FileCheck2
 	} from '@lucide/svelte';
 	import { theme } from '$lib/theme.svelte';
 	import { resolveBackendContext, waitForBackend } from '$lib/backend';
@@ -30,6 +31,7 @@
 		if (pathname === '/settings') return 'Settings | Reports';
 		if (pathname === '/logs') return 'Logs | Reports';
 		if (pathname === '/templates') return 'Report Templates | Reports';
+		if (pathname === '/pdf-fillable') return 'PDF Fillable Form | Reports';
 		if (/^\/templates\/[^/]+\/map\/?$/.test(pathname)) return 'Template Mapping | Reports';
 		if (/^\/reports\/[^/]+\/preview\/?$/.test(pathname)) return 'Report Preview | Reports';
 
@@ -144,6 +146,19 @@
 				<Layers class="h-4 w-4" />
 				Templates
 				{#if $page.url.pathname.startsWith('/templates')}
+					<ChevronRight class="ml-auto h-3 w-3 text-muted-foreground" />
+				{/if}
+			</a>
+			<a
+				href="/pdf-fillable"
+				class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+						{$page.url.pathname === '/pdf-fillable'
+					? 'bg-muted text-foreground'
+					: 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'}"
+			>
+				<FileCheck2 class="h-4 w-4" />
+				PDF Fillable Form
+				{#if $page.url.pathname === '/pdf-fillable'}
 					<ChevronRight class="ml-auto h-3 w-3 text-muted-foreground" />
 				{/if}
 			</a>

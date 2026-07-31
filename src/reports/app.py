@@ -7,7 +7,7 @@ import base64
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 
@@ -631,6 +631,47 @@ def apply_report_edits(report_id: int, body: dict):
 
 _SLUG_RE = re.compile(r'^[a-z0-9_]+$')
 _MAX_PPTX_BYTES = 50 * 1024 * 1024  # 50 MB
+_MAX_PDF_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+@app.post("/pdf/make-fillable")
+async def post_pdf_make_fillable(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+    """Detect writable boxes/rules in an uploaded PDF form and return a fillable copy."""
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only .pdf files are supported")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(content) > _MAX_PDF_BYTES:
+        raise HTTPException(status_code=413, detail="File exceeds the 50 MB limit")
+
+    from .pdf_make_fillable import DEFAULTS, build, detect
+
+    work_dir = get_app_data_dir() / "pdf-fillable-tmp"
+    work_dir.mkdir(parents=True, exist_ok=True)
+    source_name = Path(file.filename).stem or "form"
+    source_path = work_dir / f"{source_name}-{os.urandom(4).hex()}.pdf"
+    output_path = source_path.with_name(source_path.stem + "-fillable.pdf")
+
+    try:
+        source_path.write_bytes(content)
+        result = detect(str(source_path), pages=None, cfg=dict(DEFAULTS), group_mode="section")
+        if not result.boxes:
+            raise HTTPException(
+                status_code=422,
+                detail="No fillable boxes were found in this PDF (it may be a scan with no text layer).",
+            )
+        build(str(source_path), str(output_path), result.boxes, font_size=0, borders=True)
+        background_tasks.add_task(lambda: output_path.unlink(missing_ok=True))
+        return FileResponse(
+            str(output_path),
+            media_type="application/pdf",
+            filename=f"{source_name}-fillable.pdf",
+            background=background_tasks,
+        )
+    finally:
+        source_path.unlink(missing_ok=True)
 
 
 def _serialize_template(template: dict) -> dict:
