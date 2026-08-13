@@ -13,6 +13,7 @@
 	let selectedFile = $state<File | null>(null);
 	let resultUrl = $state('');
 	let resultFilename = $state('');
+	let resultMetadata = $state({ pages: 0, fields: 0, lowConfidence: 0, meanConfidence: 0, ocrPages: '' });
 
 	onMount(async () => {
 		try {
@@ -46,10 +47,11 @@
 		}
 		processing = true;
 		try {
-			const { blob, filename } = await makeFillablePdf(apiBaseUrl, selectedFile);
+			const { blob, filename, metadata } = await makeFillablePdf(apiBaseUrl, selectedFile);
 			if (resultUrl) URL.revokeObjectURL(resultUrl);
 			resultUrl = URL.createObjectURL(blob);
 			resultFilename = filename;
+			resultMetadata = metadata;
 		} catch (err) {
 			formError = err instanceof Error ? err.message : 'Conversion failed.';
 		} finally {
@@ -79,7 +81,7 @@
 				Upload PDF
 			</CardTitle>
 			<CardDescription class="mt-1">
-				The form must have a text layer (not a scanned image) so field labels can be detected.
+				Supports ordinary PDFs and scanned forms. Scans are read with OCR; existing form fields are preserved.
 			</CardDescription>
 		</CardHeader>
 		<CardContent class="space-y-4">
@@ -117,7 +119,13 @@
 						<FileCheck2 class="h-8 w-8 shrink-0 text-emerald-600 dark:text-emerald-400" />
 						<div>
 							<CardTitle class="text-base">{resultFilename}</CardTitle>
-							<CardDescription>Click into the fields below to try them out</CardDescription>
+							<CardDescription>
+								{resultMetadata.fields} fields across {resultMetadata.pages} pages.
+								{#if resultMetadata.ocrPages} OCR used on pages {resultMetadata.ocrPages}.{/if}
+								{#if resultMetadata.lowConfidence}
+									Review {resultMetadata.lowConfidence} low-confidence fields before distribution.
+								{/if}
+							</CardDescription>
 						</div>
 					</div>
 					<Button href={resultUrl} download={resultFilename} variant="outline">

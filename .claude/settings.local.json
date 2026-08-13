@@ -70,7 +70,21 @@
       "Bash(open -a \"Google Chrome\" \"/private/tmp/claude-501/-Users-rakinzisilver-Documents-GitHub-reports/760e7a28-05d4-41b0-977f-8e520f178b8d/scratchpad/business_form_fillable_v3.pdf\")",
       "Bash(curl -s http://127.0.0.1:8000/health -o /dev/null -w \"%{http_code}\\\\n\" --max-time 3)",
       "Bash(curl -s -D /Users/rakinzisilver/Documents/GitHub/reports/scratch_headers2.txt -X POST http://127.0.0.1:8000/pdf/make-fillable -F 'file=@/Users/rakinzisilver/Downloads/ilovepdf_compressed/BUSINESS ACOUNT OPENING FORM final_compressed.pdf;type=application/pdf' -o /private/tmp/claude-501/-Users-rakinzisilver-Documents-GitHub-reports/760e7a28-05d4-41b0-977f-8e520f178b8d/scratchpad/endpoint_output.pdf -w 'HTTP %{http_code}\\\\n' --max-time 120)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Read(//Users/rakinzisilver/Downloads/ilovepdf_compressed/**)",
+      "Read(//Users/rakinzisilver/Downloads/**)",
+      "Bash(.venv/bin/python3 *)",
+      "Bash(mkdir -p /private/tmp/claude-501/-Users-rakinzisilver-Documents-GitHub-reports/760e7a28-05d4-41b0-977f-8e520f178b8d/scratchpad)",
+      "Bash(lsof -ti:8000 -sTCP:LISTEN)",
+      "Bash(xargs -r kill -9)",
+      "mcp__playwright__browser_run_code_unsafe",
+      "Bash(pkill -f \"http.server 8123\")",
+      "Bash(disown)",
+      "Read(//tmp/**)",
+      "Bash(cp /private/tmp/claude-501/-Users-rakinzisilver-Documents-GitHub-reports/760e7a28-05d4-41b0-977f-8e520f178b8d/scratchpad/successlite_v5.pdf /Users/rakinzisilver/Documents/successlite_check/successlite_fillable.pdf)",
+      "Read(//Users/rakinzisilver/Documents/successlite_check/**)",
+      "Bash(break)",
+      "Bash(PYTHONPATH=src python3 -m pytest tests/test_pdf_make_fillable.py -v)"
     ]
   }
 }

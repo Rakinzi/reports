@@ -342,7 +342,11 @@ export async function uploadSlideImage(
 export async function makeFillablePdf(
 	apiBaseUrl: string,
 	file: File
-): Promise<{ blob: Blob; filename: string }> {
+): Promise<{
+	blob: Blob;
+	filename: string;
+	metadata: { pages: number; fields: number; lowConfidence: number; meanConfidence: number; ocrPages: string };
+}> {
 	const form = new FormData();
 	form.append('file', file);
 	const res = await fetch(`${apiBaseUrl}/pdf/make-fillable`, { method: 'POST', body: form });
@@ -359,7 +363,17 @@ export async function makeFillablePdf(
 	const disposition = res.headers.get('content-disposition') ?? '';
 	const match = disposition.match(/filename="?([^"]+)"?/);
 	const filename = match?.[1] ?? file.name.replace(/\.pdf$/i, '-fillable.pdf');
-	return { blob: await res.blob(), filename };
+	return {
+		blob: await res.blob(),
+		filename,
+		metadata: {
+			pages: Number(res.headers.get('x-pdf-pages') ?? 0),
+			fields: Number(res.headers.get('x-pdf-fields') ?? 0),
+			lowConfidence: Number(res.headers.get('x-pdf-low-confidence') ?? 0),
+			meanConfidence: Number(res.headers.get('x-pdf-mean-confidence') ?? 0),
+			ocrPages: res.headers.get('x-pdf-ocr-pages') ?? ''
+		}
+	};
 }
 
 export async function generateQuickReport(
