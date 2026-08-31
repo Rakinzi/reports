@@ -11,6 +11,11 @@ export type Report = {
 	error?: string | null;
 	stage?: string | null;
 	created_at: string;
+	client_name?: string;
+	ga4_property_id?: string;
+	gsc_url?: string;
+	slide1_name?: string;
+	logo_path?: string;
 };
 
 export type QuickReportRequest = {
@@ -23,6 +28,7 @@ export type QuickReportRequest = {
 	end_date: string;
 	slide1_logo_data_url: string;
 	slide1_logo_filename: string;
+	reuse_report_id?: number | null;
 };
 
 export type ChromeProfile = {
@@ -52,6 +58,25 @@ export async function resolveBackendContext(): Promise<DesktopContext> {
 	return getDesktopContext();
 }
 
+function formatErrorDetail(detail: unknown): string | null {
+	if (typeof detail === 'string') return detail;
+	if (Array.isArray(detail)) {
+		// FastAPI/Pydantic validation errors: [{ loc, msg, type, ... }, ...]
+		const messages = detail
+			.map((item) => (item && typeof item === 'object' && 'msg' in item ? String(item.msg) : null))
+			.filter((msg): msg is string => !!msg);
+		if (messages.length > 0) return messages.join('; ');
+	}
+	if (detail && typeof detail === 'object') {
+		try {
+			return JSON.stringify(detail);
+		} catch {
+			return null;
+		}
+	}
+	return null;
+}
+
 export async function fetchJson<T>(
 	apiBaseUrl: string,
 	path: string,
@@ -62,7 +87,8 @@ export async function fetchJson<T>(
 		let detail = `Request failed: ${res.status}`;
 		try {
 			const body = await res.json();
-			if (body?.detail) detail = body.detail;
+			const formatted = formatErrorDetail(body?.detail);
+			if (formatted) detail = formatted;
 		} catch {
 			// ignore parsing failure
 		}

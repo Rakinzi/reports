@@ -1340,7 +1340,9 @@ def capture_2026(
             # --- Navigate to Reports Snapshot via the confirmed button ---
             _stage("Capturing GA4 snapshot metrics...")
             if home_ready:
-                _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+                page = _open_snapshot_and_set_dates(
+                    page, report_name, start_date, end_date
+                )
             else:
                 page = _open_dated_snapshot_direct(
                     page, report_name, start_date, end_date
@@ -2408,7 +2410,11 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     """Open Reports snapshot from Home and apply the requested date range."""
     from datetime import datetime as _dt
 
-    _ensure_expected_ga4_property(page, report_name)
+    # Re-enter Home through the normal property-switching flow. A bare
+    # navigation to ``#/p<id>/home`` is not sufficient here: GA4 can restore
+    # the last property from its SPA state and silently redirect to it. This
+    # flow uses the property search UI and may return a replacement tab.
+    page = _goto_ga4_section(page, report_name, "/home")
     page.locator("span.view-link-text", has_text="View reports snapshot").click()
     page.wait_for_timeout(3000)
     _ensure_expected_ga4_property(page, report_name)
@@ -2475,6 +2481,7 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
         end_date,
         page.url,
     )
+    return page
 
 
 def _scrape_countries_table(page) -> list[dict]:
@@ -2796,7 +2803,7 @@ def _capture_ga4_metrics_no_screenshots(context, report_name: str, start_date: s
     except Exception:
         pass
 
-    _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+    page = _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
     snapshot_dashboard_url = page.url
     snapshot_metrics = _scrape_snapshot_metrics(page)
     summary_metrics = _scrape_snapshot_summary_metrics(page)
@@ -2846,7 +2853,9 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             page.bring_to_front()
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
-            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+            page = _open_snapshot_and_set_dates(
+                page, report_name, start_date, end_date
+            )
             snapshot_dashboard_url = page.url
             page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
         else:
@@ -2855,7 +2864,9 @@ def _scrape_ga4_page_paths(context, report_name: str, start_date: str, end_date:
             page = _switch_ga4_property_via_search(page, report_name)
             page = _goto_ga4_section(page, report_name, "/home")
             page.wait_for_timeout(2000)
-            _open_snapshot_and_set_dates(page, report_name, start_date, end_date)
+            page = _open_snapshot_and_set_dates(
+                page, report_name, start_date, end_date
+            )
             snapshot_dashboard_url = page.url
             page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
 

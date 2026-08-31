@@ -34,7 +34,16 @@ def init_db() -> None:
             )
         """)
         # Safe migration for existing databases
-        for col, coldef in [("slides_dir", "TEXT"), ("edits", "TEXT"), ("stage", "TEXT")]:
+        for col, coldef in [
+            ("slides_dir", "TEXT"),
+            ("edits", "TEXT"),
+            ("stage", "TEXT"),
+            ("client_name", "TEXT NOT NULL DEFAULT ''"),
+            ("ga4_property_id", "TEXT NOT NULL DEFAULT ''"),
+            ("gsc_url", "TEXT NOT NULL DEFAULT ''"),
+            ("slide1_name", "TEXT NOT NULL DEFAULT ''"),
+            ("logo_path", "TEXT NOT NULL DEFAULT ''"),
+        ]:
             try:
                 conn.execute(f"ALTER TABLE reports ADD COLUMN {col} {coldef}")
             except Exception:
@@ -84,15 +93,28 @@ def init_db() -> None:
         conn.commit()
 
 
-def create_report(report_name: str, date_range: str, report_date: str) -> int:
+def create_report(
+    report_name: str,
+    date_range: str,
+    report_date: str,
+    client_name: str = "",
+    ga4_property_id: str = "",
+    gsc_url: str = "",
+) -> int:
     """Insert a new report record with status=pending. Returns the new id."""
     with _connect() as conn:
         cur = conn.execute(
             """
-            INSERT INTO reports (report_name, date_range, report_date, status, created_at)
-            VALUES (?, ?, ?, 'pending', ?)
+            INSERT INTO reports (
+                report_name, date_range, report_date, status, created_at,
+                client_name, ga4_property_id, gsc_url
+            )
+            VALUES (?, ?, ?, 'pending', ?, ?, ?, ?)
             """,
-            (report_name, date_range, report_date, datetime.utcnow().isoformat()),
+            (
+                report_name, date_range, report_date, datetime.utcnow().isoformat(),
+                client_name, ga4_property_id, gsc_url,
+            ),
         )
         conn.commit()
         return cur.lastrowid
@@ -103,6 +125,16 @@ def update_report_completed(report_id: int, output_path: str) -> None:
         conn.execute(
             "UPDATE reports SET status='completed', output_path=?, error=NULL, stage='Completed' WHERE id=?",
             (output_path, report_id),
+        )
+        conn.commit()
+
+
+def update_report_branding(report_id: int, slide1_name: str, logo_path: str) -> None:
+    """Record the slide 1 name/logo actually applied, so Redo can reuse them."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE reports SET slide1_name=?, logo_path=? WHERE id=?",
+            (slide1_name, logo_path, report_id),
         )
         conn.commit()
 

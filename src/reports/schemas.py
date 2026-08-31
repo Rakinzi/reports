@@ -20,6 +20,7 @@ class GenerateReportRequest(BaseModel):
     slide1_name: str = ""
     slide1_logo_data_url: str = ""
     slide1_logo_filename: str = ""
+    reuse_report_id: int | None = None
 
     @field_validator("report_name")
     @classmethod
@@ -61,6 +62,7 @@ class GenerateQuickReportRequest(BaseModel):
     end_date: str            # GA4 picker format e.g. "Feb 28, 2026"
     slide1_logo_data_url: str = ""
     slide1_logo_filename: str = ""
+    reuse_report_id: int | None = None
 
     @field_validator("ga4_property_id")
     @classmethod

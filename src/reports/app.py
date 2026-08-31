@@ -17,7 +17,7 @@ from .auth_session import auth_session_status, open_google_sign_in
 from .chrome_profiles import list_profiles
 from .db import (
     init_db, create_report, list_reports, get_report,
-    update_report_completed, update_report_failed,
+    update_report_completed, update_report_failed, update_report_branding,
     update_report_slides_dir, update_report_edits, update_report_stage,
     delete_report,
     create_template, get_template, get_template_by_slug, list_templates,
@@ -41,9 +41,22 @@ REPORT_LABELS = {
 _cancel_flags: dict[int, threading.Event] = {}
 
 
-def _write_logo_override(report_id: int, data_url: str, filename: str) -> Path | None:
+def _write_logo_override(
+    report_id: int, data_url: str, filename: str, reuse_report_id: int | None = None
+) -> Path | None:
     if not data_url:
-        return None
+        if reuse_report_id is None:
+            return None
+        source_report = get_report(reuse_report_id)
+        source_path = source_report.get("logo_path") if source_report else ""
+        if not source_path or not Path(source_path).exists():
+            return None
+        logo_dir = get_app_data_dir() / "logo-overrides"
+        logo_dir.mkdir(parents=True, exist_ok=True)
+        logo_path = logo_dir / f"report-{report_id}{Path(source_path).suffix}"
+        shutil.copyfile(source_path, logo_path)
+        return logo_path
+
     match = re.match(r"^data:image/[^;]+;base64,(.+)$", data_url)
     if not match:
         raise ValueError("Slide 1 logo must be an image file.")
@@ -125,6 +138,7 @@ def _run_generate(
     slide1_name: str = "",
     slide1_logo_data_url: str = "",
     slide1_logo_filename: str = "",
+    reuse_report_id: int | None = None,
 ):
     cancel_flag = _cancel_flags.get(report_id)
 
@@ -159,10 +173,11 @@ def _run_generate(
             slide1_source_name = "Delta"
             if not slide1_name.strip():
                 slide1_name = "BancABC"
-        logo_path = _write_logo_override(report_id, slide1_logo_data_url, slide1_logo_filename)
+        logo_path = _write_logo_override(report_id, slide1_logo_data_url, slide1_logo_filename, reuse_report_id)
         if slide1_name.strip() or logo_path is not None:
             update_report_stage(report_id, "Applying slide 1 branding...")
             _apply_slide1_overrides(Path(output_path), report_name, slide1_source_name, slide1_name, logo_path)
+        update_report_branding(report_id, slide1_name.strip(), str(logo_path) if logo_path else "")
         update_report_stage(report_id, "Finalising report...")
         update_report_completed(report_id, str(output_path))
         logger.info("Completed report generation for report_id=%s output_path=%s", report_id, output_path)
@@ -205,7 +220,9 @@ def _run_generate_quick(report_id: int, report_name: str, body: "GenerateQuickRe
             _stage_callback=stage_callback,
         )
 
-        logo_path = _write_logo_override(report_id, body.slide1_logo_data_url, body.slide1_logo_filename)
+        logo_path = _write_logo_override(
+            report_id, body.slide1_logo_data_url, body.slide1_logo_filename, body.reuse_report_id
+        )
         update_report_stage(report_id, "Applying slide 1 branding...")
         _apply_slide1_overrides(
             Path(output_path),
@@ -214,6 +231,7 @@ def _run_generate_quick(report_id: int, report_name: str, body: "GenerateQuickRe
             slide1_name=body.client_name,
             logo_path=logo_path,
         )
+        update_report_branding(report_id, body.client_name, str(logo_path) if logo_path else "")
 
         update_report_stage(report_id, "Finalising report...")
         update_report_completed(report_id, str(output_path))
@@ -346,6 +364,7 @@ def post_generate_report(body: GenerateReportRequest):
         body.slide1_name,
         body.slide1_logo_data_url,
         body.slide1_logo_filename,
+        body.reuse_report_id,
     )
     return JSONResponse({"id": report_id, "status": "pending"}, status_code=202)
 
@@ -373,7 +392,12 @@ def post_generate_quick_report(body: GenerateQuickReportRequest):
                 "Please choose a different client name."
             ),
         )
-    report_id = create_report(slug, body.date_range, body.report_date)
+    report_id = create_report(
+        slug, body.date_range, body.report_date,
+        client_name=body.client_name,
+        ga4_property_id=body.ga4_property_id,
+        gsc_url=body.gsc_url,
+    )
     _cancel_flags[report_id] = threading.Event()
     _executor.submit(_run_generate_quick, report_id, slug, body)
     return JSONResponse({"id": report_id, "status": "pending"}, status_code=202)

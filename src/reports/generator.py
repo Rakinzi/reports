@@ -131,18 +131,56 @@ def _leave_ga4_start_page(page, property_key: str, section_fragment: str = "/hom
 
 
 def _ensure_expected_ga4_property(page, property_key: str, timeout: int = 15000) -> None:
+    """Wait for the page URL to settle on the expected property.
+
+    GA4's SPA router can drift back to a stale property (e.g. one left over
+    from a previous report run in the same browser session) a few seconds
+    after first landing on the correct one. A single wait_for_function only
+    confirms the URL matched *once*, which is not enough — so after the
+    first match we re-check after a short settle delay, and if GA4 has
+    drifted away in the meantime we re-navigate and try again.
+    """
     expected_token = _ga4_property_token(property_key)
-    page.wait_for_function(
-        """
+    predicate = """
         expected => {
             const href = window.location.href;
             return href.includes(expected)
                 && !href.includes('/reports/start');
         }
-        """,
-        arg=expected_token,
-        timeout=timeout,
-    )
+        """
+
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            page.wait_for_function(predicate, arg=expected_token, timeout=timeout)
+            page.wait_for_timeout(2000)
+            if expected_token in page.url and "/reports/start" not in page.url:
+                return
+            logger.warning(
+                "GA4 property drifted away after initial match. property=%s attempt=%s current_url=%s",
+                property_key, attempt, page.url,
+            )
+            last_error = RuntimeError(
+                f"GA4 drifted off property '{property_key}' after initial match; current_url={page.url}"
+            )
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "GA4 property wait failed. property=%s attempt=%s current_url=%s error=%s",
+                property_key, attempt, page.url, exc,
+            )
+
+        if attempt < 3:
+            url = _ga4_navigation_url(page, property_key, "/home")
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            except Exception:
+                pass
+            page.wait_for_timeout(1500)
+
+    raise RuntimeError(
+        f"Could not keep GA4 on property '{property_key}'; kept drifting back to another property."
+    ) from last_error
 
 
 def _ga4_section_aliases(section_fragment: str) -> list[str]:

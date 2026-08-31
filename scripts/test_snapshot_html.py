@@ -64,7 +64,9 @@ def main() -> int:
                 pass
 
             print(f"{INFO} Opening Reports Snapshot and applying date range...")
-            _open_snapshot_and_set_dates(page, args.report_name, args.start_date, args.end_date)
+            page = _open_snapshot_and_set_dates(
+                page, args.report_name, args.start_date, args.end_date
+            )
             _ensure_expected_ga4_property(page, args.report_name)
             print(f"{INFO} Snapshot URL: {page.url}")
 

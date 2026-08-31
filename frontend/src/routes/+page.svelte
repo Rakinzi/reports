@@ -8,7 +8,6 @@
 		Clock,
 		CheckCircle2,
 		XCircle,
-		Loader2,
 		RefreshCw,
 		Settings,
 		Square,
@@ -61,6 +60,7 @@
 	];
 
 	let reportOptions = $state<ReportOption[]>(FALLBACK_REPORT_OPTIONS);
+	let reportOptionsLoaded = $state(false);
 
 	const STAT_CARDS = [
 		{ label: 'Total Reports', key: 'total', icon: FileText, color: 'text-zinc-400' },
@@ -95,7 +95,8 @@
 	let slide1Name = $state('');
 	let slide1LogoDataUrl = $state('');
 	let slide1LogoFileName = $state('');
-	let redoingReportId = $state<number | null>(null);
+	let redoOfReportId = $state<number | null>(null);
+	let redoLogoAvailable = $state(false);
 
 	let quickOpen = $state(false);
 	let quickGenerating = $state(false);
@@ -207,7 +208,8 @@
 				start_date: quickStartDate,
 				end_date: quickEndDate,
 				slide1_logo_data_url: quickLogoDataUrl,
-				slide1_logo_filename: quickLogoFileName
+				slide1_logo_filename: quickLogoFileName,
+				reuse_report_id: quickLogoDataUrl ? null : redoOfReportId
 			});
 			quickOpen = false;
 			await refreshReports();
@@ -267,6 +269,7 @@
 			await refreshReports();
 			try {
 				reportOptions = await fetchReportOptions(apiBaseUrl);
+				reportOptionsLoaded = true;
 			} catch {
 				// Keep fallback options if endpoint not yet available
 			}
@@ -306,43 +309,53 @@
 		slide1Name = '';
 		slide1LogoDataUrl = '';
 		slide1LogoFileName = '';
+		redoOfReportId = null;
+		redoLogoAvailable = false;
 		generateError = '';
 		generateOpen = true;
 	}
 
-	async function redoReport(report: Report) {
+	function redoReport(report: Report) {
 		const dates = reportDateParts(report);
 		if (!dates.startRaw || !dates.endRaw || !dates.reportRaw) {
 			refreshError = 'Could not reuse this report’s dates.';
 			return;
 		}
-
-		redoingReportId = report.id;
 		refreshError = '';
-		try {
-			const option = reportOptions.find((item) => item.value === report.report_name);
-			const response = await fetchJson<{ id: number }>(apiBaseUrl, '/reports/generate', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					report_name: report.report_name,
-					date_range: report.date_range,
-					report_date: report.report_date,
-					start_date: toGA4Date(dates.startRaw),
-					end_date: toGA4Date(dates.endRaw),
-					slide1_source_name: option?.label ?? report.report_name,
-					slide1_name: '',
-					slide1_logo_data_url: '',
-					slide1_logo_filename: ''
-				})
-			});
-			await refreshReports();
-			pollReport(response.id);
-		} catch (error) {
-			refreshError = error instanceof Error ? error.message : 'Could not redo the report.';
-		} finally {
-			redoingReportId = null;
+
+		if (!report.client_name && !reportOptions.some((option) => option.value === report.report_name)) {
+			refreshError = `Can't redo "${report.report_name}" — its template is no longer available.`;
+			return;
 		}
+
+		redoOfReportId = report.id;
+		redoLogoAvailable = !!report.logo_path;
+
+		if (report.client_name) {
+			// Quick Report: reopen the Quick Report dialog, prefilled, so dates can be edited.
+			quickPropertyId = report.ga4_property_id ?? '';
+			quickClientName = report.client_name;
+			quickGscUrl = report.gsc_url ?? '';
+			quickStartDateRaw = dates.startRaw;
+			quickEndDateRaw = dates.endRaw;
+			quickReportDateRaw = dates.reportRaw;
+			quickLogoDataUrl = '';
+			quickLogoFileName = '';
+			quickError = '';
+			quickOpen = true;
+			return;
+		}
+
+		// Built-in or custom-template report: reopen the Generate dialog, prefilled.
+		startDateRaw = dates.startRaw;
+		endDateRaw = dates.endRaw;
+		reportDateRaw = dates.reportRaw;
+		reportName = report.report_name;
+		slide1Name = report.slide1_name ?? '';
+		slide1LogoDataUrl = '';
+		slide1LogoFileName = '';
+		generateError = '';
+		generateOpen = true;
 	}
 
 	function handleLogoChange(event: Event) {
@@ -463,7 +476,8 @@
 					slide1_source_name: selectedReportLabel,
 					slide1_name: slide1Name.trim(),
 					slide1_logo_data_url: slide1LogoDataUrl,
-					slide1_logo_filename: slide1LogoFileName
+					slide1_logo_filename: slide1LogoFileName,
+					reuse_report_id: slide1LogoDataUrl ? null : redoOfReportId
 				})
 			});
 			generateOpen = false;
@@ -506,7 +520,11 @@
 			</Button>
 			<Button
 				size="sm"
-				onclick={() => (generateOpen = true)}
+				onclick={() => {
+					redoOfReportId = null;
+					redoLogoAvailable = false;
+					generateOpen = true;
+				}}
 				disabled={!settings.configured || booting || !backendReady}
 			>
 				<Plus class="mr-2 h-4 w-4" />
@@ -515,7 +533,11 @@
 			<Button
 				size="sm"
 				variant="outline"
-				onclick={() => (quickOpen = true)}
+				onclick={() => {
+					redoOfReportId = null;
+					redoLogoAvailable = false;
+					quickOpen = true;
+				}}
 				disabled={!settings.configured || booting || !backendReady}
 			>
 				<Plus class="mr-2 h-4 w-4" />
@@ -616,22 +638,16 @@
 										<TableCell class="text-right">
 											{#if report.status === 'completed' && report.output_path}
 												<div class="flex items-center justify-end gap-2">
-													{#if reportOptions.some((option) => option.value === report.report_name)}
-														<Button
-															size="sm"
-															variant="ghost"
-															disabled={redoingReportId === report.id}
-															onclick={() => void redoReport(report)}
-															title="Generate this report again with the same dates"
-														>
-															{#if redoingReportId === report.id}
-																<Loader2 class="mr-1.5 h-3.5 w-3.5 animate-spin" />
-															{:else}
-																<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
-															{/if}
-															Redo
-														</Button>
-													{/if}
+													<Button
+														size="sm"
+														variant="ghost"
+														disabled={!reportOptionsLoaded}
+														onclick={() => redoReport(report)}
+														title={reportOptionsLoaded ? 'Regenerate this report, with the option to change dates' : 'Loading report options…'}
+													>
+														<RefreshCw class="mr-1.5 h-3.5 w-3.5" />
+														Redo
+													</Button>
 													<Button
 														size="sm"
 														variant="ghost"
@@ -845,6 +861,8 @@
 						<p class="text-xs text-muted-foreground">Dicomm McCann keeps the template logo.</p>
 					{:else if slide1LogoFileName}
 						<p class="text-xs text-muted-foreground">{slide1LogoFileName}</p>
+					{:else if redoLogoAvailable}
+						<p class="text-xs text-muted-foreground">Using the logo from the previous report. Choose a file to replace it.</p>
 					{/if}
 				</div>
 			</div>
@@ -992,6 +1010,8 @@
 				/>
 				{#if quickLogoFileName}
 					<p class="text-xs text-muted-foreground">{quickLogoFileName}</p>
+				{:else if redoLogoAvailable}
+					<p class="text-xs text-muted-foreground">Using the logo from the previous report. Choose a file to replace it.</p>
 				{/if}
 			</div>
 
