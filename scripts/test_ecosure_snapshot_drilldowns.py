@@ -12,7 +12,6 @@ if str(REPO_ROOT) not in sys.path:
 from src.reports.generator import _launch_persistent_context, _set_date_range
 from src.reports.generator_2026 import (
     _goto_snapshot_explorer,
-    _return_to_snapshot_dashboard,
 )
 from src.reports.runtime import load_runtime_environment
 
@@ -43,9 +42,6 @@ def main() -> int:
             page = _goto_snapshot_explorer(page, "ecosure", snapshot_url, "countries")
             page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=20000)
             print(f"COUNTRIES_URL: {page.url}")
-
-            page = _return_to_snapshot_dashboard(page, "ecosure", snapshot_url)
-            print(f"RETURNED_SNAPSHOT_URL: {page.url}")
 
             page = _goto_snapshot_explorer(page, "ecosure", snapshot_url, "pages")
             page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=20000)

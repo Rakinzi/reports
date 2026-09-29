@@ -17,16 +17,24 @@ ga4_property_id on the template row is used as before.
 """
 
 import json
+import hashlib
 import os
 import re
 import shutil
 from pathlib import Path
+from uuid import uuid4
 
 from .db import get_template_by_slug, list_template_sections
 from .logging_utils import configure_logging
 from .runtime import get_output_dir, load_runtime_environment
 
 logger = configure_logging()
+
+# Field types computed from the report's own date_range/report_date params
+# rather than scraped per-property GA4 data — identical across every section,
+# so shapes carrying these can still be filled on slides outside every
+# property section's range (e.g. a cover or divider slide).
+_SECTION_INDEPENDENT_TEXT_FIELDS = {"perf_month", "date_range", "report_date"}
 
 # ---------------------------------------------------------------------------
 # Public entry point
@@ -154,13 +162,23 @@ def generate_user_template(
                 image_paths_by_key[key] = _capture_image_fields(
                     page=page,
                     field_map=section_field_map,
-                    report_name=f"{report_name}_sec{key}" if key is not None else report_name,
+                    report_name=f"{report_name}_sec{key}_{uuid4().hex}" if key is not None else f"{report_name}_{uuid4().hex}",
                     start_date=start_date,
                     end_date=end_date,
                     ga4_property_id=pid,
                     gsc_url=prop.get("gsc_url", ""),
                     metrics_context=metrics_context,
                 )
+                required_images = {
+                    m.get("field_type") for m in section_field_map
+                    if m.get("shape_type") == "image" and m.get("field_type") not in {"", "static_image"}
+                }
+                missing_images = sorted(required_images - image_paths_by_key[key].keys())
+                if missing_images:
+                    raise RuntimeError(
+                        f"Cannot generate {report_name}: current capture missing "
+                        + ", ".join(missing_images)
+                    )
         finally:
             ctx.close()
 
@@ -173,6 +191,7 @@ def generate_user_template(
         section_field_map = [
             m for m in field_map
             if prop["start_slide"] <= m.get("slide_index", 0) <= prop["end_slide"]
+            or m.get("field_type") in _SECTION_INDEPENDENT_TEXT_FIELDS
         ]
         text_values_by_key[key] = _build_text_values(
             section_field_map,
@@ -180,15 +199,21 @@ def generate_user_template(
             ctx["snapshot_metrics"],
             date_range,
             report_date,
+            ctx["devices"],
         )
 
     stage("Filling template shapes...")
     output_path = get_output_dir() / f"{report_name}-{report_date.replace(' ', '_')}.pptx"
-    shutil.copy(str(pptx_path), str(output_path))
-    _fill_template_sections(
-        output_path, field_map, props_to_scrape, sections,
-        text_values_by_key, image_paths_by_key,
-    )
+    pending_path = output_path.with_name(f".{output_path.stem}-{uuid4().hex}.pptx")
+    try:
+        shutil.copy(str(pptx_path), str(pending_path))
+        _fill_template_sections(
+            pending_path, field_map, props_to_scrape, sections,
+            text_values_by_key, image_paths_by_key,
+        )
+        pending_path.replace(output_path)
+    finally:
+        pending_path.unlink(missing_ok=True)
 
     logger.info("User template report generated: %s", output_path)
     return output_path
@@ -267,6 +292,22 @@ def _collect_acquisition_metrics(page) -> dict[str, int]:
     return acquisition
 
 
+def _collect_device_metrics(page) -> dict[str, int]:
+    """Return {device_category: active_users} from the Tech > Overview > platform devices table."""
+    devices: dict[str, int] = {}
+    try:
+        page = _open_reports_snapshot(page)
+        _navigate_tech_overview_table(page, "View platform devices")
+        body = page.locator("body").inner_text()
+        for line in [text.strip() for text in body.splitlines() if text.strip()]:
+            match = re.match(r"^\d+\t(.+?)\t(\d+)\s*", line)
+            if match:
+                devices[match.group(1).strip()] = int(match.group(2).strip())
+    except Exception as exc:
+        logger.warning("Could not collect device metrics: %s", exc)
+    return devices
+
+
 def _open_reports_snapshot(page):
     """Open the GA4 snapshot layout that contains the countries/pages drilldowns."""
     page.locator("span.view-link-text", has_text="View reports snapshot").click()
@@ -301,6 +342,7 @@ def _collect_live_metrics(
     weekly_active_users: dict[str, int] = {}
     acquisition: dict[str, int] = {}
     page_views: dict[str, int] = {}
+    devices: dict[str, int] = {}
 
     try:
         page = _restore_property_home(page, ga4_property_id)
@@ -320,12 +362,19 @@ def _collect_live_metrics(
     except Exception as exc:
         logger.warning("Could not collect page views: %s", exc)
 
+    try:
+        page = _restore_property_home(page, ga4_property_id)
+        devices = _collect_device_metrics(page)
+    except Exception as exc:
+        logger.warning("Could not collect device metrics: %s", exc)
+
     return {
         "home_metrics": home_metrics,
         "snapshot_metrics": snapshot_metrics,
         "acquisition": acquisition,
         "page_views": page_views,
         "weekly_active_users": weekly_active_users,
+        "devices": devices,
     }
 
 
@@ -358,6 +407,7 @@ def _build_text_values(
     snapshot_metrics: dict,
     date_range: str,
     report_date: str,
+    devices: dict[str, int] | None = None,
 ) -> dict[str, str]:
     """Return a dict of field_type → text value for all text-type mappings."""
     values: dict[str, str] = {}
@@ -391,7 +441,7 @@ def _build_text_values(
             values[ft] = snapshot_metrics.get("ctr", "N/A")
         elif ft.startswith("narrative_") or ft.startswith("subtitle_") or ft == "recommendations":
             # Collect for batch Gemini call
-            raw = _build_gemini_raw(ft, home_metrics, snapshot_metrics)
+            raw = _build_gemini_raw(ft, home_metrics, snapshot_metrics, devices or {})
             gemini_raws.append((ft, raw))
         else:
             values[ft] = "N/A"
@@ -407,7 +457,12 @@ def _build_text_values(
     return values
 
 
-def _build_gemini_raw(field_type: str, home_metrics: dict, snapshot_metrics: dict) -> str:
+def _build_gemini_raw(
+    field_type: str,
+    home_metrics: dict,
+    snapshot_metrics: dict,
+    devices: dict[str, int] | None = None,
+) -> str:
     """Build the raw stats string that Gemini will paraphrase for a given Gemini field type."""
     hm = home_metrics
     sm = snapshot_metrics
@@ -419,6 +474,16 @@ def _build_gemini_raw(field_type: str, home_metrics: dict, snapshot_metrics: dic
             f"New users: {hm.get('New users', 'N/A')}\n"
             f"Engagement time: {hm.get('Average engagement time per active user', 'N/A')}"
         )
+
+    if field_type == "narrative_devices":
+        if not devices:
+            return "Write a professional insight about device-type performance, noting that a device breakdown was not available this period."
+        total = sum(devices.values()) or 1
+        breakdown = "\n".join(
+            f"{name}: {count} users ({count / total * 100:.1f}%)"
+            for name, count in sorted(devices.items(), key=lambda item: item[1], reverse=True)
+        )
+        return f"Write a professional insight about traffic by device type, using this breakdown of active users:\n{breakdown}"
 
     # Generic: provide all available metrics as context
     metrics_str = "\n".join(f"{k}: {v}" for k, v in {**hm, **sm}.items())
@@ -493,16 +558,20 @@ def _capture_single_image_field(
         page.screenshot(path=str(out_path), clip={"x": 0, "y": 0, "width": 1920, "height": 600})
     elif field_type == "screenshot_countries_table":
         page = _restore_property_home(page, ga4_property_id)
+        _set_date_range(page, start_date, end_date)
         page = _open_reports_snapshot(page)
         page.locator("span.view-link-text", has_text="View countries").click()
         page.wait_for_timeout(4000)
-        page.screenshot(path=str(out_path), full_page=True)
+        from .ga4_screenshots import capture_ga4_table
+        capture_ga4_table(page, out_path)
     elif field_type == "screenshot_pages_table":
         page = _restore_property_home(page, ga4_property_id)
+        _set_date_range(page, start_date, end_date)
         page = _open_reports_snapshot(page)
         page.locator("span.view-link-text", has_text="View pages and screens").click()
         page.wait_for_timeout(4000)
-        page.screenshot(path=str(out_path), full_page=True)
+        from .ga4_screenshots import capture_ga4_table
+        capture_ga4_table(page, out_path)
     elif field_type in {"gsc_queries_table", "gsc_pages_table"}:
         if not gsc_url:
             logger.warning("No Search Console URL configured for '%s'", report_name)
@@ -521,13 +590,57 @@ def _capture_single_image_field(
             return None
         out_path = _capture_security_headers(page, gsc_url, out_path)
     elif field_type in {"search_screenshot", "screenshot_search_console"}:
-        page.screenshot(path=str(out_path))
+        if not gsc_url:
+            raise RuntimeError("Search Console URL is required for a search screenshot")
+        from datetime import datetime
+        from .generator_2026 import _gsc_performance_url, _open_gsc_performance_property
+
+        resource_id = _open_gsc_performance_property(page, gsc_url)
+        start_dt = datetime.strptime(start_date, "%b %d, %Y")
+        end_dt = datetime.strptime(end_date, "%b %d, %Y")
+        page.goto(
+            _gsc_performance_url(resource_id, start_dt, end_dt),
+            wait_until="domcontentloaded",
+            timeout=30000,
+        )
+        page.wait_for_selector("text=Total clicks", state="attached", timeout=20000)
+        module = page.locator('c-wiz[jsname="tqqCbc"]').first
+        module.wait_for(state="visible", timeout=10000)
+        module.screenshot(path=str(out_path))
+    elif field_type == "platform_devices_table":
+        page = _restore_property_home(page, ga4_property_id)
+        _set_date_range(page, start_date, end_date)
+        page = _open_reports_snapshot(page)
+        out_path = _capture_tech_overview_table(page, "View platform devices", out_path)
+    elif field_type == "browsers_table":
+        page = _restore_property_home(page, ga4_property_id)
+        _set_date_range(page, start_date, end_date)
+        page = _open_reports_snapshot(page)
+        out_path = _capture_tech_overview_table(page, "View browsers", out_path)
     elif field_type.startswith("chart_"):
         out_path = _generate_chart(field_type, out_path, metrics_context)
     else:
         return None
 
     return out_path if out_path and out_path.exists() else None
+
+
+def _navigate_tech_overview_table(page, view_link_text: str) -> None:
+    """Open a Tech > Overview drilldown table (platform devices, browsers, ...)."""
+    page.locator("ga-secondary-nav-item button").filter(has_text="Tech").click()
+    page.wait_for_timeout(1500)
+    page.locator("ga-secondary-nav-item button").filter(has_text="Overview").last.click()
+    page.wait_for_timeout(3000)
+    page.locator("span.view-link-text", has_text=view_link_text).click()
+    page.wait_for_timeout(4000)
+
+
+def _capture_tech_overview_table(page, view_link_text: str, out_path: Path) -> Path | None:
+    """Capture a Tech > Overview drilldown table (platform devices, browsers, ...)."""
+    _navigate_tech_overview_table(page, view_link_text)
+
+    from .ga4_screenshots import capture_ga4_table
+    return capture_ga4_table(page, out_path)
 
 
 def _capture_gsc_dimension_table(
@@ -599,7 +712,49 @@ def _capture_security_headers(page, site_url: str, out_path: Path) -> Path:
     summary_card.wait_for(state="visible", timeout=15000)
     summary_card.scroll_into_view_if_needed()
     page.wait_for_timeout(500)
+    summary_text = summary_card.inner_text()
+    parsed_summary = summary_card.locator("*").evaluate_all(
+        r"""elements => {
+          const leaves = elements.filter(el => el.children.length === 0);
+          const grade = leaves.map(el => el.textContent.trim())
+            .find(text => /^[A-F][+-]?$/.test(text)) || '';
+          const headers = [
+            'Strict-Transport-Security', 'Content-Security-Policy',
+            'X-Frame-Options', 'X-Content-Type-Options',
+            'Referrer-Policy', 'Permissions-Policy'
+          ];
+          const states = {};
+          for (const name of headers) {
+            const leaf = leaves.find(el => el.textContent.trim() === name);
+            if (!leaf) continue;
+            let node = leaf;
+            for (let depth = 0; node && depth < 12; depth++, node = node.parentElement) {
+              const cls = typeof node.className === 'string' ? node.className : '';
+              const style = getComputedStyle(node);
+              const color = `${style.color} ${style.backgroundColor}`.toLowerCase();
+              const rgbValues = [...color.matchAll(/rgba?\((\d+),\s*(\d+),\s*(\d+)/g)]
+                .map(match => match.slice(1).map(Number));
+              const hasRed = rgbValues.some(([r, g, b]) => r > 150 && r > g * 1.3 && r > b * 1.3);
+              const hasGreen = rgbValues.some(([r, g, b]) => g > 100 && g > r * 1.3 && g > b * 1.1);
+              const marker = `${cls} ${node.getAttribute('aria-label') || ''} `
+                + `${node.getAttribute('title') || ''}`;
+              if (/missing|fail|error|danger|red|cross|times/i.test(marker)
+                  || hasRed) {
+                states[name] = 'missing'; break;
+              }
+              if (/present|pass|success|good|green|check/i.test(marker)
+                  || hasGreen) {
+                states[name] = 'present'; break;
+              }
+            }
+          }
+          return {grade, header_status: states};
+        }"""
+    )
     summary_card.screenshot(path=str(out_path))
+    out_path.with_suffix(".json").write_text(
+        json.dumps({"summary_text": summary_text, **parsed_summary}, indent=2), encoding="utf-8"
+    )
     return out_path
 
 
@@ -689,46 +844,69 @@ def _fill_template_sections(
         field_type = mapping.get("field_type", "")
         shape_type = mapping.get("shape_type", "text")
 
-        if not field_type:
+        if not field_type or field_type in {"static_text", "static_image"}:
             continue
         if slide_index >= len(prs.slides):
-            logger.warning("Slide index %d out of range — skipping shape '%s'", slide_index, shape_name)
-            continue
+            raise RuntimeError(f"Mapped slide {slide_index + 1} is missing for shape '{shape_name}'")
 
         # Resolve which section key owns this slide
         section_key = None
+        section_found = False
         for prop in props_to_scrape:
             if prop["start_slide"] <= slide_index <= prop["end_slide"]:
                 section_key = prop["section_key"]
+                section_found = True
                 break
 
-        text_values = text_values_by_key.get(section_key, {})
-        image_paths = image_paths_by_key.get(section_key, {})
+        if section_found:
+            text_values = text_values_by_key.get(section_key, {})
+            image_paths = image_paths_by_key.get(section_key, {})
+        elif field_type in _SECTION_INDEPENDENT_TEXT_FIELDS:
+            # Slide belongs to no property section (e.g. a cover/divider slide
+            # outside every section's range). These fields are computed from the
+            # report's own date_range/report_date, not scraped GA4 data, so every
+            # section's text_values carries the same value — use the first.
+            text_values = next(iter(text_values_by_key.values()), {})
+            image_paths = {}
+        else:
+            raise RuntimeError(f"No GA4 property section covers mapped shape '{shape_name}' on slide {slide_index + 1}")
 
         slide = prs.slides[slide_index]
         shape = _find_shape_by_name(slide, shape_name)
         if shape is None:
-            logger.warning("Shape '%s' not found in slide %d — skipping", shape_name, slide_index)
-            continue
+            raise RuntimeError(f"Mapped shape '{shape_name}' is missing on slide {slide_index + 1}")
 
         if shape_type == "text":
             value = text_values.get(field_type, "")
-            if not value:
-                continue
+            if not value or value == "N/A":
+                raise RuntimeError(f"Current data for '{field_type}' is missing on slide {slide_index + 1}")
             if shape.has_text_frame and shape.text_frame.paragraphs:
-                _fill_text_run(shape.text_frame.paragraphs[0], value)
+                paragraphs = shape.text_frame.paragraphs
+                _fill_text_run(paragraphs[0], value)
+                # Multi-paragraph placeholders (e.g. "Comments:\n\n{body}") would
+                # otherwise leak their original template text after ours.
+                for extra_para in paragraphs[1:]:
+                    extra_para._p.getparent().remove(extra_para._p)
             else:
-                logger.warning("Shape '%s' has no text frame — skipping", shape_name)
+                raise RuntimeError(f"Mapped text shape '{shape_name}' has no text frame on slide {slide_index + 1}")
 
         elif shape_type == "image":
             img_path = image_paths.get(field_type)
             if img_path and img_path.exists():
+                if shape.shape_type != 13:
+                    raise RuntimeError(f"Mapped image shape '{shape_name}' is not a picture on slide {slide_index + 1}")
                 try:
                     _replace_image_in_slide(slide, img_path, shape_name=shape_name)
                 except Exception as exc:
-                    logger.warning("Could not replace image for shape '%s': %s", shape_name, exc)
+                    raise RuntimeError(f"Could not replace image '{shape_name}' on slide {slide_index + 1}") from exc
+                expected = hashlib.sha256(Path(img_path).read_bytes()).digest()
+                if not any(
+                    item.shape_type == 13 and hashlib.sha256(item.image.blob).digest() == expected
+                    for item in slide.shapes
+                ):
+                    raise RuntimeError(f"Current image '{field_type}' was not embedded on slide {slide_index + 1}")
             else:
-                logger.warning("No image available for field_type '%s' — skipping", field_type)
+                raise RuntimeError(f"Current image for '{field_type}' is missing on slide {slide_index + 1}")
 
     prs.save(str(output_path))
     logger.info("Saved filled template to %s", output_path)

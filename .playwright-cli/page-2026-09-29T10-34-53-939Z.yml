@@ -1,0 +1,107 @@
+- generic [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link [ref=e5] [cursor=pointer]:
+        - /url: https://sucuri.net
+      - generic [ref=e11]:
+        - navigation [ref=e12]:
+          - link "Website Monitoring" [ref=e13] [cursor=pointer]:
+            - /url: https://sucuri.net/malware-detection-scanning/
+          - link "Website Firewall" [ref=e14] [cursor=pointer]:
+            - /url: https://sucuri.net/website-hack-protection/
+          - link "Malware Removal" [ref=e15] [cursor=pointer]:
+            - /url: https://sucuri.net/website-security-platform/help-now/
+        - navigation [ref=e16]:
+          - link "Knowledgebase" [ref=e17] [cursor=pointer]:
+            - /url: https://docs.sucuri.net/
+          - link "Support" [ref=e18] [cursor=pointer]:
+            - /url: https://support.sucuri.net/
+  - generic [ref=e20]:
+    - generic [ref=e22]:
+      - heading "Free website malware and security checker" [level=1] [ref=e23]
+      - paragraph [ref=e24]: Enter a URL like example.com and the Sucuri SiteCheck scanner will check the website for known malware, viruses, blacklisting status, website errors, out-of-date software, and malicious code.
+      - generic [ref=e25]:
+        - textbox "example.com" [active] [ref=e26]
+        - button "Submit" [ref=e27] [cursor=pointer]
+    - paragraph [ref=e30]:
+      - strong [ref=e31]: "Disclaimer:"
+      - text: Sucuri SiteCheck is a free website security scanner. Remote scanners have limited access and results are not guaranteed. For a full website scan at the client and server levels,
+      - link "contact our team." [ref=e32] [cursor=pointer]:
+        - /url: https://sucuri.net/company/contact-us/
+    - generic [ref=e33]:
+      - heading "Website protection you can depend on." [level=2] [ref=e35]
+      - generic [ref=e36]:
+        - generic [ref=e37]:
+          - generic [ref=e43] [cursor=pointer]
+          - heading "Website Monitoring" [level=3] [ref=e44]
+          - paragraph [ref=e45]: Malware removal and hack repair (response)
+          - link "Detect Malware" [ref=e46] [cursor=pointer]:
+            - /url: https://sucuri.net/malware-detection-scanning/
+        - generic [ref=e47]:
+          - generic [ref=e54] [cursor=pointer]
+          - heading "Website Firewall" [level=3] [ref=e55]
+          - paragraph [ref=e56]: Protect and speed up your site
+          - link "Protect Your Site" [ref=e57] [cursor=pointer]:
+            - /url: https://sucuri.net/website-hack-protection/
+        - generic [ref=e58]:
+          - generic [ref=e69] [cursor=pointer]
+          - heading "Malware Removal" [level=3] [ref=e70]
+          - paragraph [ref=e71]: Get rid of malware and clean up a hacked site
+          - link "Remove Malware" [ref=e72] [cursor=pointer]:
+            - /url: https://sucuri.net/website-security-platform/help-now/
+    - generic [ref=e73]:
+      - heading "How SiteCheck detects viruses and security threats." [level=2] [ref=e75]
+      - generic [ref=e76]:
+        - generic [ref=e89]:
+          - heading "Scan Website For Malware & Viruses" [level=2] [ref=e90]
+          - paragraph [ref=e91]: Detect malicious code and infected file locations by scanning your external website source code.
+        - generic [ref=e97]:
+          - heading "Check Website Blacklist Status" [level=2] [ref=e98]
+          - paragraph [ref=e99]: See if your website is blacklisted by website security authorities such as Google, PhishTank, etc.
+        - generic [ref=e105]:
+          - heading "Find Out-of-Date Software & Plugins" [level=2] [ref=e106]
+          - paragraph [ref=e107]: Identify if your website is running an outdated CMS or vulnerable plugins and extensions.
+        - generic [ref=e113]:
+          - heading "Detect Website Security Issues" [level=2] [ref=e114]
+          - paragraph [ref=e115]: Check your website for security anomalies, configuration issues, and security recommendations.
+    - generic [ref=e117]:
+      - heading "Why use a website checker?" [level=3] [ref=e118]
+      - paragraph [ref=e119]: Regularly monitoring your site for malware and indicators of compromise can help you keep tabs on your website’s security and focus your perspective to identify security related issues. Quick response to threats help maintain SEO rankings, organic traffic, brand reputation, and protect website visitors from harm.
+    - generic [ref=e121]:
+      - heading "How to check if a website is safe." [level=3] [ref=e122]
+      - paragraph [ref=e123]: Scanning a website’s source code for malicious links, redirects, iframes, JavaScript, or spam can help you determine if a website is not safe to use. Run a web safety check with SiteCheck to scan for any viruses or malware for a specific URL. A quick remote malware scan can help you pinpoint any configuration issues or security anomalies at the client level.
+    - generic [ref=e125]:
+      - heading "About Sucuri" [level=3] [ref=e126]
+      - heading "What is Sucuri SiteCheck?" [level=4] [ref=e127]
+      - paragraph [ref=e128]: The SiteCheck scanner remotely checks any URL for security threats, malware, defacements, out-of-date CMS, blacklisting, and other important security issues. It visits a website like an everyday user would to verify the source code for malicious behavior or security anomalies.
+      - paragraph [ref=e129]:
+        - text: Since the remote scanner only has access to what’s visible on the browser level, it will not detect anything on the server-side. To scan every file in a website’s directory and detect phishing pages, backdoors, mailers, DoS scripts or any other malware at the server level enable the
+        - link "Sucuri Platform." [ref=e130] [cursor=pointer]:
+          - /url: https://sucuri.net/website-security-platform/
+      - heading "Is Sucuri SiteCheck safe?" [level=4] [ref=e131]
+      - paragraph [ref=e132]: SiteCheck helps millions of webmasters every year by providing free remote website scanning for security issues. Sucuri’s SiteCheck monitoring is powered by a highly technical team of security professionals distributed around the world. Our trained security team is skilled at identifying issues and cleaning up hacked websites.
+  - contentinfo [ref=e133]:
+    - generic [ref=e134]:
+      - generic [ref=e135]: © 2024 Sucuri Inc. All rights reserved.
+      - generic [ref=e136]:
+        - link "Terms" [ref=e137] [cursor=pointer]:
+          - /url: https://sucuri.net/terms
+        - link "Privacy" [ref=e138] [cursor=pointer]:
+          - /url: https://sucuri.net/privacy
+    - navigation [ref=e139]:
+      - link "SITECHECK" [ref=e140] [cursor=pointer]:
+        - /url: /
+      - generic [ref=e141] [cursor=pointer]: Help
+  - alert "privacyAlert" [ref=e144]:
+    - button "Close modal" [ref=e146] [cursor=pointer]:
+      - generic: x
+    - generic [ref=e147]:
+      - generic [ref=e148]: We serve cookies.
+      - text: We use tools, such as cookies, to enable essential services and functionality on our site and to collect data on how visitors interact with our site, products and services. By clicking Accept, you agree to our use of these tools for advertising, analytics and support.
+      - link "Privacy Policy" [ref=e149] [cursor=pointer]:
+        - /url: https://www.sucuri.net/privacy
+    - group [ref=e151]:
+      - generic [ref=e152]:
+        - button "Manage" [ref=e153] [cursor=pointer]
+        - button "Decline" [ref=e154] [cursor=pointer]
+        - button "Accept" [ref=e155] [cursor=pointer]

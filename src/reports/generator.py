@@ -28,6 +28,7 @@ from .charts import (
     generate_user_type_pie_chart,
 )
 from .logging_utils import configure_logging
+from .ga4_screenshots import capture_ga4_table
 from .runtime import (
     get_app_data_dir,
     get_managed_chrome_profile_directory,
@@ -272,12 +273,13 @@ def _open_analytics_root(page) -> None:
 
 
 def _click_first_visible(locator) -> bool:
-    count = locator.count()
-    for index in range(count):
+    # Broad GA4 locators can match many nested page elements. Bound both the
+    # candidate count and each click so a stale overlay cannot hang a report.
+    for index in range(min(locator.count(), 12)):
         candidate = locator.nth(index)
         try:
             candidate.wait_for(state="visible", timeout=1500)
-            candidate.click()
+            candidate.click(timeout=4000)
             return True
         except Exception:
             continue
@@ -328,6 +330,10 @@ def _switch_ga4_property_via_search(page, property_key: str):
 
     for attempt in range(1, 3):
         _open_analytics_root(page)
+        if f"p{property_id}" in page.url and not _is_ga4_start_page(page.url):
+            _ensure_expected_ga4_property(page, property_key)
+            logger.info("GA4 is already on property_id=%s", property_id)
+            return page
         for resolve in search_selectors:
             try:
                 candidate = resolve()
@@ -347,14 +353,12 @@ def _switch_ga4_property_via_search(page, property_key: str):
         raise RuntimeError("Could not find the GA4 search bar to switch properties.")
 
     url_before_fill = page.url
-    search_input.click()
-    page.wait_for_timeout(500)
-    search_input.press_sequentially(property_id, delay=80)
+    search_input.fill(property_id, timeout=5000)
 
     # Give GA4 a moment to react — it may auto-navigate via the Insights panel
     # (typing the property ID triggers an "Ask Analytics Advisor" flow that lands
     # directly on the correct property without requiring a dropdown click).
-    page.wait_for_timeout(3000)
+    page.wait_for_timeout(1500)
 
     # Only skip click logic if GA4 *navigated* to the correct property after the fill
     # (URL must have changed to include the property token).
@@ -378,32 +382,19 @@ def _switch_ga4_property_via_search(page, property_key: str):
         page.wait_for_timeout(500)
         return page
 
-    result_candidates = page.locator('[role="option"], [role="menuitem"], a, button, li')
-    # Match results whose own label contains "(GA4 Property <id>)" — avoids matching
-    # results that only mention the id in a description sub-element.
-    ga4_label_result = result_candidates.filter(
-        has_text=re.compile(rf"GA4 Property\s+{re.escape(property_id)}", re.I)
-    )
-    # Fallback: any result whose text contains the bare property id
-    exact_result = result_candidates.filter(
-        has_text=re.compile(rf"\b{re.escape(property_id)}\b")
+    # The global search now opens an Analytics Advisor panel. Its property
+    # suggestion includes "GA4 Property <id>" as a nested text element; the
+    # old broad a/button/li search could spend minutes on unrelated controls.
+    result_text = page.get_by_text(
+        re.compile(rf"GA4 Property\s+{re.escape(property_id)}", re.I)
     )
     previous_page_count = len(page.context.pages)
-
-    if _click_first_visible(ga4_label_result):
-        logger.info("Selected GA4 property result by label for property_id=%s", property_id)
-    elif _click_first_visible(exact_result):
-        logger.info("Selected GA4 search result matching property_id=%s", property_id)
-    elif _click_first_visible(result_candidates):
-        logger.info("Selected first visible GA4 search result for property_id=%s", property_id)
-    else:
-        try:
-            search_input.press("Enter")
-            logger.info("Submitted GA4 search via Enter for property_id=%s", property_id)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Could not select a GA4 search result for property '{property_key}' ({property_id})."
-            ) from exc
+    logger.info("Selecting GA4 property result for property_id=%s", property_id)
+    if not _click_first_visible(result_text):
+        raise RuntimeError(
+            f"Could not select a GA4 property result for '{property_key}' ({property_id})."
+        )
+    logger.info("Selected GA4 property result for property_id=%s", property_id)
 
     page = _resolve_post_click_page(page, previous_page_count)
     page = _leave_ga4_start_page(page, property_key)
@@ -651,28 +642,6 @@ def _scrape_home_metrics(page) -> dict:
                 value = _extract_metric_value(combined, label)
                 if value:
                     metrics[label] = value
-        except Exception:
-            pass
-
-    # GA4 sometimes exposes only New/Returning user cards clearly while Active users
-    # is visually present but not labeled in accessible text. Use the exact total when
-    # it can be reconstructed from the two component counts.
-    if "Active users" not in metrics:
-        try:
-            def _parse_metric_num(value: str) -> int:
-                s = value.strip().replace(",", "")
-                if s.upper().endswith("K"):
-                    return int(float(s[:-1]) * 1000)
-                if s.upper().endswith("M"):
-                    return int(float(s[:-1]) * 1_000_000)
-                return int(float(s))
-
-            new_users = metrics.get("New users")
-            returning_users = metrics.get("Returning users")
-            if new_users and returning_users:
-                metrics["Active users"] = str(
-                    _parse_metric_num(new_users) + _parse_metric_num(returning_users)
-                )
         except Exception:
             pass
 
@@ -1077,24 +1046,8 @@ def capture_screenshots_and_metrics(
                 page.locator("span.view-link-text", has_text="View countries").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
-                row_num_col = page.locator("th.cdk-column-__row_index__").first
-                end_col = page.locator("th.cdk-column-DEFAULT-engagedSessionsPerUser").first
-                row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
-                start_box = row_num_col.bounding_box()
-                end_box = end_col.bounding_box()
-                table_box = page.locator("table.adv-table").bounding_box()
-                clip = {
-                    "x": start_box["x"],
-                    "y": table_box["y"],
-                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                    "height": table_box["height"],
-                }
                 path = out_dir / "countries_table.png"
-                page.screenshot(path=str(path), clip=clip, full_page=True)
+                capture_ga4_table(page, path)
                 screenshots["countries_table"] = path
             except Exception:
                 pass
@@ -1130,24 +1083,8 @@ def capture_screenshots_and_metrics(
                 page.locator("span.view-link-text", has_text="View pages and screens").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
-                row_num_col = page.locator("th.cdk-column-__row_index__").first
-                end_col = page.locator("th.cdk-column-DEFAULT-userEngagementDurationPerUser").first
-                row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
-                start_box = row_num_col.bounding_box()
-                end_box = end_col.bounding_box()
-                table_box = page.locator("table.adv-table").bounding_box()
-                clip = {
-                    "x": start_box["x"],
-                    "y": table_box["y"],
-                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                    "height": table_box["height"],
-                }
                 path = out_dir / "pages_table.png"
-                page.screenshot(path=str(path), clip=clip, full_page=True)
+                capture_ga4_table(page, path)
                 screenshots["pages_table"] = path
 
                 # Scrape top 4 page names + view counts
@@ -1173,17 +1110,9 @@ def capture_screenshots_and_metrics(
                 page.locator("span.view-link-text", has_text="View platform devices").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
-                row_num_col = page.locator("th.cdk-column-__row_index__").first
-                row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
-                table_box = page.locator("table.adv-table").bounding_box()
-                if table_box:
-                    path = out_dir / "platform_devices_table.png"
-                    page.screenshot(path=str(path), clip=table_box, full_page=True)
-                    screenshots["platform_devices_table"] = path
+                path = out_dir / "platform_devices_table.png"
+                capture_ga4_table(page, path)
+                screenshots["platform_devices_table"] = path
             except Exception:
                 pass
 
@@ -1201,17 +1130,9 @@ def capture_screenshots_and_metrics(
                 page.locator("span.view-link-text", has_text="View browsers").click()
                 page.wait_for_timeout(4000)
                 _ensure_expected_ga4_property(page, report_name)
-                row_num_col = page.locator("th.cdk-column-__row_index__").first
-                row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
-                table_box = page.locator("table.adv-table").bounding_box()
-                if table_box:
-                    path = out_dir / "browsers_table.png"
-                    page.screenshot(path=str(path), clip=table_box, full_page=True)
-                    screenshots["browsers_table"] = path
+                path = out_dir / "browsers_table.png"
+                capture_ga4_table(page, path)
+                screenshots["browsers_table"] = path
             except Exception:
                 pass
 

@@ -130,7 +130,7 @@ def test_configured_image_slots_exist_in_every_active_template():
 
 def test_prepared_mimosa_template_has_standard_order_and_image_slots():
     prs = Presentation(
-        str(get_templates_dir() / "june-2026/mimosa-29-June-2026.pptx")
+        str(get_templates_dir() / TEMPLATES_2026["mimosa"])
     )
     assert _find_slide_index(prs, "Overview") == 1
     assert _find_slide_index(prs, "Executive Summary") == 2
@@ -190,7 +190,7 @@ def test_traffic_acquisition_insight_is_never_empty_when_scrape_has_no_rows():
     assert "The table compares website acquisition sources" in narrative.text
 
 
-def test_executive_summary_copy_matches_previous_template_style():
+def test_executive_summary_compares_separate_ga4_user_metrics():
     texts = _exec_summary_texts(
         "delta",
         {
@@ -201,11 +201,27 @@ def test_executive_summary_copy_matches_previous_template_style():
         {},
     )
     assert "15K active users" in texts["para0"]
-    assert "14K (93.3%) new visitors" in texts["para0"]
-    assert "audience mix" in texts["para0"]
+    assert "14K new users" in texts["para0"]
+    assert "93.3%" in texts["para0"]
+    assert "separate metrics" in texts["para0"]
+    assert "rather than the share of visitors who were new" in texts["para0"]
     assert "36s" in texts["para2"]
     assert texts["para1_no_gsc"] == ""
     assert texts["para3"] == ""
+
+
+def test_ecocash_executive_summary_includes_user_ratio_without_engagement_rate():
+    texts = _exec_summary_texts(
+        "ecocash",
+        {"Active users": "36K", "New users": "30K",
+         "Average engagement time per active user": "42s"},
+        {},
+    )
+    assert "36K active users" in texts["para0"]
+    assert "30K new users" in texts["para0"]
+    assert "83.3% of the active-user total" in texts["para0"]
+    assert "rather than the share of visitors who were new" in texts["para0"]
+    assert "engagement rate" not in texts["para0"]
 
 
 def test_parses_traffic_acquisition_row():

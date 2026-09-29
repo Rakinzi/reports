@@ -1,0 +1,183 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link [ref=e5] [cursor=pointer]:
+        - /url: https://sucuri.net
+      - generic [ref=e11]:
+        - navigation [ref=e12]:
+          - link "Website Monitoring" [ref=e13] [cursor=pointer]:
+            - /url: https://sucuri.net/malware-detection-scanning/
+          - link "Website Firewall" [ref=e14] [cursor=pointer]:
+            - /url: https://sucuri.net/website-hack-protection/
+          - link "Malware Removal" [ref=e15] [cursor=pointer]:
+            - /url: https://sucuri.net/website-security-platform/help-now/
+        - navigation [ref=e16]:
+          - link "Knowledgebase" [ref=e17] [cursor=pointer]:
+            - /url: https://docs.sucuri.net/
+          - link "Support" [ref=e18] [cursor=pointer]:
+            - /url: https://support.sucuri.net/
+  - generic [ref=e156]:
+    - navigation [ref=e158]:
+      - link [ref=e159] [cursor=pointer]:
+        - /url: javascript:void(0)
+      - heading "https://www.bancabc.co.zw" [level=1] [ref=e165]
+    - generic [ref=e167]:
+      - generic [ref=e168]:
+        - generic [ref=e171]:
+          - heading "No Malware Found" [level=2] [ref=e172]
+          - paragraph [ref=e173]: Our scanner didn't detect any malware
+        - generic [ref=e176]:
+          - heading "Site is not Blacklisted" [level=2] [ref=e177]
+          - paragraph [ref=e178]: 9 Blacklists checked
+      - generic [ref=e179]:
+        - paragraph [ref=e186]: https://www.bancabc.co.zw/
+        - generic [ref=e187]:
+          - paragraph [ref=e188]: "IP address: 66.29.138.15"
+          - paragraph [ref=e189]: "Hosting: Unknown"
+          - paragraph [ref=e190]: "Running on: Nginx"
+        - generic [ref=e191]:
+          - paragraph [ref=e192]: "CMS: Drupal"
+          - paragraph [ref=e193]: "Powered by: Unknown"
+          - paragraph [ref=e194]:
+            - link "More Details" [ref=e195] [cursor=pointer]:
+              - /url: "#"
+      - generic [ref=e196]:
+        - generic [ref=e199]:
+          - generic [ref=e200]: Minimal
+          - generic [ref=e201]: Low Security Risk
+          - generic [ref=e202]: Medium
+          - generic [ref=e203]: High
+          - generic [ref=e204]: Critical
+        - table
+      - paragraph [ref=e206]:
+        - text: Our automated scan did not detect malware on your site. If you still believe that your site has been hacked,
+        - link "sign up" [ref=e207] [cursor=pointer]:
+          - /url: https://sucuri.net/website-security-platform/signup
+        - text: for a complete scan, manual audit, and guaranteed malware removal.
+    - generic [ref=e209]:
+      - generic [ref=e210]:
+        - generic [ref=e211]:
+          - heading "Website Malware & Security" [level=2] [ref=e212]
+          - list [ref=e213]:
+            - listitem [ref=e214]:
+              - generic [ref=e216]: No malware detected by scan (Low Risk)
+            - listitem [ref=e217]:
+              - generic [ref=e219]: No injected spam detected (Low Risk)
+            - listitem [ref=e220]:
+              - generic [ref=e222]: No defacements detected (Low Risk)
+            - listitem [ref=e223]:
+              - generic [ref=e225]: No internal server errors detected (Low Risk)
+        - generic [ref=e227]:
+          - generic [ref=e228]:
+            - generic [ref=e232] [cursor=pointer]
+            - paragraph [ref=e233]: Website Monitoring
+            - paragraph [ref=e234]: Not detected
+            - link "Learn More" [ref=e236] [cursor=pointer]:
+              - /url: https://sucuri.net/malware-detection-scanning/
+          - generic [ref=e237]:
+            - generic [ref=e241] [cursor=pointer]
+            - paragraph [ref=e242]: Website Firewall
+            - paragraph [ref=e243]: Not Detected
+            - link "Explore Sucuri Firewall" [ref=e245] [cursor=pointer]:
+              - /url: https://sucuri.net/website-hack-protection/
+      - generic [ref=e246]:
+        - heading "Website Blacklist Status" [level=2] [ref=e247]
+        - generic [ref=e249] [cursor=pointer]
+        - list [ref=e250]:
+          - listitem [ref=e251]:
+            - link "Domain clean by Google Safe Browsing" [ref=e254] [cursor=pointer]:
+              - /url: http://safebrowsing.clients.google.com/safebrowsing/diagnostic?site=www.bancabc.co.zw
+          - listitem [ref=e255]:
+            - link "Domain clean by McAfee" [ref=e258] [cursor=pointer]:
+              - /url: http://www.siteadvisor.com/sitereport.html?url=www.bancabc.co.zw
+          - listitem [ref=e259]:
+            - link "Domain clean by Sucuri Labs" [ref=e262] [cursor=pointer]:
+              - /url: https://labs.sucuri.net/?blacklist=www.bancabc.co.zw
+          - listitem [ref=e263]:
+            - link "Domain clean by ESET" [ref=e266] [cursor=pointer]:
+              - /url: https://labs.sucuri.net/?eset
+          - listitem [ref=e267]:
+            - link "Domain clean by PhishTank" [ref=e270] [cursor=pointer]:
+              - /url: https://www.phishtank.com
+          - listitem [ref=e271]:
+            - link "Domain clean by Yandex" [ref=e274] [cursor=pointer]:
+              - /url: https://www.yandex.com/infected?url=www.bancabc.co.zw
+          - listitem [ref=e275]:
+            - link "Domain clean by Opera" [ref=e278] [cursor=pointer]:
+              - /url: https://www.opera.com
+        - paragraph [ref=e279]:
+          - text: Your site does not appear to be blacklisted. If you still see security warnings on your site,
+          - link "sign up" [ref=e280] [cursor=pointer]:
+            - /url: https://sucuri.net/website-security-platform/signup
+          - text: for a more complete scan, manual audit, and guaranteed blacklist removal.
+    - generic [ref=e282]:
+      - heading "Hardening Improvements" [level=2] [ref=e283]
+      - generic [ref=e284]:
+        - heading "Protection" [level=3] [ref=e285]
+        - paragraph [ref=e286]:
+          - text: No website application firewall detected. Please install a cloud-based WAF to
+          - link "prevent website hacks and DDoS attacks." [ref=e287] [cursor=pointer]:
+            - /url: https://sucuri.net/website-hack-protection/
+      - generic [ref=e288]:
+        - heading "Security Headers" [level=3] [ref=e289]
+        - paragraph [ref=e290]:
+          - text: Missing security header for
+          - link "ClickJacking Protection" [ref=e291] [cursor=pointer]:
+            - /url: https://docs.sucuri.net/warnings/hardening/security-headers-x-frame-options/
+          - text: . Alternatively, you can use
+          - 'link "Content-Security-Policy: frame-ancestors ''none''." [ref=e292] [cursor=pointer]':
+            - /url: https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/frame-ancestors
+        - paragraph [ref=e293]:
+          - text: Missing security header
+          - link "to prevent Content Type sniffing" [ref=e294] [cursor=pointer]:
+            - /url: https://docs.sucuri.net/warnings/hardening/security-headers-x-content-type-nosniff/
+          - text: .
+        - paragraph [ref=e295]:
+          - text: Missing
+          - link "Content-Security-Policy directive." [ref=e296] [cursor=pointer]:
+            - /url: https://blog.sucuri.net/2018/04/content-security-policy.html
+          - text: "We recommend to add the following CSP directives (you can use default-src if all values are the same): script-src, base-uri, frame-src"
+    - generic [ref=e297]:
+      - heading "Hacked? Get help now." [level=2] [ref=e299]
+      - generic [ref=e300]:
+        - generic [ref=e301]:
+          - generic [ref=e307] [cursor=pointer]
+          - heading "Website Monitoring" [level=3] [ref=e308]
+          - paragraph [ref=e309]: Find and identify malware and issues on your site
+          - link "Detect Malware" [ref=e311] [cursor=pointer]:
+            - /url: https://sucuri.net/malware-detection-scanning/
+        - generic [ref=e312]:
+          - generic [ref=e319] [cursor=pointer]
+          - heading "Website Firewall" [level=3] [ref=e320]
+          - paragraph [ref=e321]: Protect and speed up your site
+          - link "Protect Your Site" [ref=e323] [cursor=pointer]:
+            - /url: https://sucuri.net/website-hack-protection/
+        - generic [ref=e324]:
+          - generic [ref=e336] [cursor=pointer]
+          - heading "Malware Removal" [level=3] [ref=e337]
+          - paragraph [ref=e338]: Get rid of malware and clean up a hacked site
+          - link "Remove Malware" [ref=e340] [cursor=pointer]:
+            - /url: https://sucuri.net/website-security-platform/help-now/
+    - generic [ref=e341]:
+      - generic [ref=e342]:
+        - paragraph [ref=e343]:
+          - text: Scanned 3 hours ago. Force a
+          - link "Re-scan" [ref=e344] [cursor=pointer]:
+            - /url: ""
+          - text: to clear the cache.
+        - heading "Check another URL." [level=3] [ref=e345]
+      - generic [ref=e25]:
+        - textbox "Scan another website..." [ref=e348]
+        - button "Scan Website" [ref=e349] [cursor=pointer]
+  - contentinfo [ref=e133]:
+    - generic [ref=e134]:
+      - generic [ref=e135]: © 2024 Sucuri Inc. All rights reserved.
+      - generic [ref=e136]:
+        - link "Terms" [ref=e137] [cursor=pointer]:
+          - /url: https://sucuri.net/terms
+        - link "Privacy" [ref=e138] [cursor=pointer]:
+          - /url: https://sucuri.net/privacy
+    - navigation [ref=e139]:
+      - link "SITECHECK" [ref=e140] [cursor=pointer]:
+        - /url: /
+      - generic [ref=e141] [cursor=pointer]: Help

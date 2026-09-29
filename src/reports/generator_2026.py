@@ -7,11 +7,13 @@ Called by app.py when the requested report name is in TEMPLATES_2026.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 from copy import deepcopy
 from pathlib import Path
 from urllib.parse import parse_qsl, quote as urlquote, urlencode, urlsplit, urlunsplit
+from uuid import uuid4
 
 import lxml.etree as etree
 from google import genai
@@ -20,6 +22,8 @@ from pptx import Presentation
 from pptx.oxml.ns import qn
 
 from .charts import generate_country_bar_chart
+from .evidence_screenshots import capture_google_results, capture_sitecheck
+from .ga4_screenshots import capture_ga4_table
 from .logging_utils import configure_logging
 from .runtime import (
     get_output_dir,
@@ -74,17 +78,17 @@ GA4_PROPERTIES_2026: dict[str, str] = {
 }
 
 TEMPLATES_2026: dict[str, str] = {
-    "econet":       "june-2026/econet-29-June-2026.pptx",
-    "econet_ai":    "june-2026/econet-ai-29-June-2026.pptx",
-    "infraco":      "june-2026/infraco-29-June-2026.pptx",
-    "ecocash":      "june-2026/ecocash-29-June-2026.pptx",
-    "ecosure":      "june-2026/ecosure-29-June-2026.pptx",
-    "zimplats":     "june-2026/zimplats-29-June-2026.pptx",
-    "cancer_serve": "june-2026/cancer_serve-29-June-2026.pptx",
-    "dicomm":       "june-2026/dicomm-29-June-2026.pptx",
-    "delta":        "june-2026/delta-25-June-2026.pptx",
-    "bancabc":      "june-2026/bancabc-29-June-2026.pptx",
-    "mimosa":       "june-2026/mimosa-29-June-2026.pptx",
+    "econet":       "recent-2026/econet.pptx",
+    "econet_ai":    "recent-2026/econet_ai.pptx",
+    "infraco":      "recent-2026/infraco.pptx",
+    "ecocash":      "recent-2026/ecocash.pptx",
+    "ecosure":      "recent-2026/ecosure.pptx",
+    "zimplats":     "recent-2026/zimplats.pptx",
+    "cancer_serve": "recent-2026/cancer_serve.pptx",
+    "dicomm":       "recent-2026/dicomm.pptx",
+    "delta":        "recent-2026/delta.pptx",
+    "bancabc":      "recent-2026/bancabc.pptx",
+    "mimosa":       "recent-2026/mimosa.pptx",
 }
 
 # These client templates intentionally omit Search Performance.
@@ -114,6 +118,161 @@ def _find_slide_index(prs, title: str) -> int | None:
 def _find_traffic_acquisition_slide_index(prs) -> int | None:
     """Return the Traffic Acquisition slide index, if the template has one."""
     return _find_slide_index(prs, "Traffic Acquisition")
+
+
+_SEO_QUERY_OVERRIDES = {
+    "delta": ["Delta Beverages Zimbabwe", "Delta Beverages Mazoe Orange Crush"],
+    "dicomm": ["Dicomm McCann Zimbabwe"],
+    "mimosa": ["mining companies in Zimbabwe", "best platinum mines in Zimbabwe", "Mimosa Mining Company"],
+}
+
+
+def _seo_picture_slots(prs, report_name: str) -> list[tuple[int, str, str, str]]:
+    """Return (slide index, picture name, search query, capture key) for SEO pictures."""
+    slots = []
+    queries = _SEO_QUERY_OVERRIDES.get(report_name, [])
+    for slide_index, slide in enumerate(prs.slides):
+        headings = [shape.text_frame.text.strip().casefold() for shape in slide.shapes
+                    if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip()]
+        first = headings[0] if headings else ""
+        if not first.startswith(("seo", "google search results", "the search results for")):
+            continue
+        for shape in slide.shapes:
+            if shape.shape_type != 13:
+                continue
+            slot_number = len(slots)
+            query = queries[slot_number] if slot_number < len(queries) else _report_display_name(report_name)
+            slots.append((slide_index, shape.name, query, f"seo_results_{slot_number}"))
+    return slots
+
+
+def _sitecheck_picture_slot(prs, report_name: str = "") -> tuple[int, str] | None:
+    index = _find_slide_index(prs, "Security")
+    if index is None:
+        return None
+    pictures = [shape for shape in prs.slides[index].shapes if shape.shape_type == 13]
+    if len(pictures) < 2:
+        return None
+    header_name = _SECURITY_HEADERS_PICTURE.get(report_name)
+    sitecheck = next((shape for shape in pictures if shape.name != header_name), None)
+    return (index, sitecheck.name) if sitecheck else None
+
+
+def _remove_duplicate_security_slides(prs) -> None:
+    """Remove duplicate Security pages that have no live data source."""
+    first_security_index = _find_slide_index(prs, "Security")
+    for index in reversed(range(len(prs.slides))):
+        slide = prs.slides[index]
+        headings = [shape.text_frame.text.strip().casefold() for shape in slide.shapes
+                    if getattr(shape, "has_text_frame", False) and shape.text_frame.text.strip()]
+        first = headings[0] if headings else ""
+        if first == "security":
+            # Only Mimosa has a second Security slide with older third-party
+            # port/SSL screenshots that this pipeline cannot refresh.
+            remove = index != first_security_index
+        else:
+            remove = False
+        if remove:
+            slide_id = prs.slides._sldIdLst[index]
+            prs.part.drop_rel(slide_id.rId)
+            prs.slides._sldIdLst.remove(slide_id)
+
+
+def _seo_result_narrative(report_name: str, query: str, results: list[dict], existing: str) -> str | None:
+    """Keep supported edited copy; describe current results when its claim is stale."""
+    site_url = GSC_URLS.get(report_name) or SECURITY_HEADER_URLS.get(report_name, "")
+    official_domain = (urlsplit(site_url).hostname or "").removeprefix("www.")
+    domains = [str(result.get("domain", "")).removeprefix("www.") for result in results]
+    official_rank = next(
+        (index for index, domain in enumerate(domains)
+         if official_domain and (domain == official_domain or domain.endswith("." + official_domain))),
+        None,
+    )
+    existing_lower = existing.casefold()
+    unsupported_claim = any(
+        phrase in existing_lower for phrase in ("ai overview", "ai-generated", "ai search")
+    )
+    if (official_rank == 0 and "official" in existing_lower
+            and "top result" in existing_lower and not unsupported_claim):
+        return None
+
+    brand = _report_display_name(report_name)
+    if official_rank == 0:
+        return (
+            f'The official {brand} website is the first visible Google result for “{query}”. '
+            "Users can reach the brand's own information directly from this search."
+        )
+    if official_rank is not None:
+        rank = ("second", "third", "fourth", "fifth")[official_rank - 1]
+        return (
+            f'For “{query}”, the official {brand} website appears as the {rank} visible '
+            f'Google result, after “{results[0]["title"]}”. This gives the site visibility '
+            "alongside other sources for the search."
+        )
+    first = results[0]
+    return (
+        f'For “{query}”, the first visible Google result is “{first["title"]}” '
+        f'from {first["domain"]}. The official {brand} website does not appear among '
+        f'the first {len(results)} results captured, leaving room to improve its visibility.'
+    )
+
+
+def _apply_supplemental_evidence(prs, report_name: str, screenshots: dict) -> None:
+    slots = _seo_picture_slots(prs, report_name)
+    missing = [key for _, _, _, key in slots if key not in screenshots or not Path(screenshots[key]).is_file()]
+    sitecheck_slot = _sitecheck_picture_slot(prs, report_name)
+    if sitecheck_slot and ("sitecheck_screenshot" not in screenshots
+                           or not Path(screenshots["sitecheck_screenshot"]).is_file()):
+        missing.append("sitecheck_screenshot")
+    if missing:
+        raise RuntimeError(f"Cannot generate {report_name} report: current capture missing "
+                           + ", ".join(missing))
+
+    for slide_index, picture_name, _, key in slots:
+        _replace_picture_with_fallback(
+            prs.slides[slide_index], screenshots[key], candidate_names=(picture_name,),
+            slot_label=f"{report_name} SEO screenshot on slide {slide_index + 1}",
+            preserve_aspect=True,
+        )
+    queries_by_slide: dict[int, list[tuple[str, str]]] = {}
+    for slide_index, _, query, key in slots:
+        queries_by_slide.setdefault(slide_index, []).append((query, key))
+    for slide_index, entries in queries_by_slide.items():
+        slide = prs.slides[slide_index]
+        target_names = (["Text Box 6", "Text Box 9"] if report_name == "mimosa" and len(entries) == 2
+                        else ["object 5", "Text Box 9"])
+        narrative_shapes = [
+            next((shape for shape in slide.shapes if shape.name == name
+                  and getattr(shape, "has_text_frame", False)
+                  and shape.text_frame.text.strip()), None)
+            for name in target_names
+        ]
+        narrative_shapes = [shape for shape in narrative_shapes if shape is not None]
+        if len(narrative_shapes) < len(entries):
+            raise RuntimeError(f"Cannot generate {report_name} report: SEO narrative slot is missing")
+        for (query, key), shape in zip(entries, narrative_shapes):
+            metadata_path = Path(screenshots[key]).with_suffix(".json")
+            if not metadata_path.is_file():
+                raise RuntimeError(f"Cannot generate {report_name} report: SEO result details are missing for {query}")
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if metadata.get("query") != query or not metadata.get("results"):
+                raise RuntimeError(f"Cannot generate {report_name} report: SEO result details are invalid for {query}")
+            message = _seo_result_narrative(report_name, query, metadata["results"], shape.text_frame.text)
+            if message:
+                _fill_paragraph_slots(shape, [message], clear_extra=True)
+    if sitecheck_slot:
+        slide_index, picture_name = sitecheck_slot
+        _replace_picture_with_fallback(
+            prs.slides[slide_index], screenshots["sitecheck_screenshot"],
+            candidate_names=(picture_name,),
+            slot_label=f"{report_name} SiteCheck screenshot",
+            preserve_aspect=True,
+        )
+
+    for slide_index, _, _, key in slots:
+        _verify_embedded_captures(prs, screenshots, {slide_index: key}, report_name)
+    if sitecheck_slot:
+        _verify_embedded_captures(prs, screenshots, {sitecheck_slot[0]: "sitecheck_screenshot"}, report_name)
 
 
 # Google Search Console site URLs — used to build the performance report URL
@@ -173,7 +332,10 @@ def _gemini_paras_batch(raws: list[str]) -> list[str]:
     try:
         if len(raws) == 1:
             word_count = len(raws[0].split())
-            client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+            client = genai.Client(
+                api_key=os.environ["GEMINI_API_KEY"],
+                http_options={"timeout": 60_000},
+            )
             resp = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=(
@@ -198,7 +360,10 @@ def _gemini_paras_batch(raws: list[str]) -> list[str]:
             f"One plain paragraph per number. No other text.\n\n"
             + sections
         )
-        client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+        client = genai.Client(
+            api_key=os.environ["GEMINI_API_KEY"],
+            http_options={"timeout": 60_000},
+        )
         resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         raw_output = resp.text.strip()
 
@@ -285,33 +450,43 @@ def _exec_summary_texts(report_name: str, home_metrics: dict, snapshot_metrics: 
     except (ValueError, TypeError):
         active_users_short = str(active_users)
 
-    def _parse_num(val: str) -> int:
+    def _parse_num(val: str) -> float:
         s = str(val).strip().replace(",", "")
-        if s.upper().endswith("K"):
-            return int(float(s[:-1]) * 1000)
-        return int(float(s))
-
-    try:
-        nu = _parse_num(new_users)
-        au = _parse_num(active_users)
-        new_pct = f"{round(nu / au * 100, 1)}%" if au > 0 else "N/A"
-    except (ValueError, TypeError, ZeroDivisionError):
-        new_pct = "N/A"
+        multiplier = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
+        suffix = s[-1:].upper()
+        if suffix in multiplier:
+            return float(s[:-1]) * multiplier[suffix]
+        return float(s)
 
     engagement = home_metrics.get("Average engagement time per active user", "N/A")
+    try:
+        new_user_ratio = _parse_num(new_users) / _parse_num(active_users) * 100
+        new_user_ratio_text = f"{new_user_ratio:.1f}%"
+    except (ValueError, TypeError, ZeroDivisionError):
+        new_user_ratio_text = None
+
+    if new_user_ratio_text:
+        first_paragraph = (
+            f"During the reporting period, the {brand} website recorded {active_users} active users "
+            f"and {new_users} new users, equal to {new_user_ratio_text} of the active-user total. "
+            "GA4 reports these as separate metrics, so the percentage compares counts rather than "
+            "the share of visitors who were new."
+        )
+    else:
+        first_paragraph = (
+            f"During the reporting period, the {brand} website recorded {active_users} active users "
+            f"and {new_users} new users. GA4 reports active users and new users as separate metrics, "
+            "so the counts should be read independently."
+        )
     return {
         "active_users_short": active_users_short,
-        "new_pct": new_pct,
-        "subtitle": f"Performance overview shows {new_pct} of users were first-time visitors.",
-        "para0": (
-            f"During the reporting period, the {brand} website attracted {active_users} active users, "
-            f"including {new_users} ({new_pct}) new visitors. This audience mix reflects the website's "
-            "continued ability to reach and attract new users across digital channels."
-        ),
+        "new_users": str(new_users),
+        "subtitle": f"Performance overview records {active_users} active users and {new_users} new users.",
+        "para0": first_paragraph,
         "para1_no_gsc": "",
         "para2": (
-            f"Average engagement time was {engagement}, showing that visitors spent meaningful time "
-            "interacting with the website content rather than leaving immediately."
+            f"Average engagement time per active user was {engagement}, adding a measure of "
+            "interaction time alongside the audience and acquisition totals."
         ),
         "para3": "",
     }
@@ -330,30 +505,20 @@ def _site_overview_paras(report_name: str, home_metrics: dict, snapshot_metrics:
             return int(float(s[:-1]) * 1000)
         return int(float(s))
 
-    try:
-        au = _parse_num(active_users)
-        nu = _parse_num(new_users)
-        new_pct = f"{round(nu / au * 100, 1)}%"
-    except (ValueError, TypeError, ZeroDivisionError):
-        new_pct = "N/A"
-
     # Subtitle — "User Engagement Metrics: 34K Strong Active User Baseline"
     raw_subtitle = f"User Engagement Metrics: {active_users} Strong Active User Baseline"
 
-    if new_pct != "N/A":
-        new_user_clause = f"Of these, {new_users} users ({new_pct}) were new visitors"
-    else:
-        new_user_clause = f"Of these, {new_users} users were new visitors"
+    new_user_clause = f"GA4 also recorded {new_users} new users"
 
     raw_para0 = (
         f"The reporting period reflects solid and encouraging performance for the {brand} website, "
         f"with a total of {active_users} active users recorded during the period. "
-        f"{new_user_clause}, highlighting continued strong "
+        f"{new_user_clause}, highlighting continued "
         f"brand discovery and the effectiveness of current reach and awareness initiatives."
     )
 
     raw_para2 = (
-        f"The consistently high proportion of new users suggests that marketing efforts, "
+        f"The new-user count suggests that marketing efforts, "
         f"search visibility, and broader brand exposure are successfully attracting first-time "
         f"audiences to the platform. This level of new user acquisition indicates that the {brand} website "
         f"remains highly discoverable and competitive within its category."
@@ -579,7 +744,7 @@ def _label_page_paths_with_gemini(pages_data: list[dict]) -> None:
             row["title"] = _fallback_page_label(row.get("path", row["title"]))
         return
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, http_options={"timeout": 60_000})
     path_list = "\n".join(f"- {row.get('path', row['title'])}" for row in pages_data)
     prompt = (
         "You are labeling website page paths for a PowerPoint report.\n"
@@ -1023,45 +1188,6 @@ def _restore_snapshot_route_after_date_apply(page, report_name: str, snapshot_ur
     return page
 
 
-def _return_to_snapshot_dashboard(page, report_name: str, snapshot_url: str):
-    """Return to the same reporting-hub dashboard instead of relying on GA4 history."""
-    last_error: Exception | None = None
-    for attempt in range(1, 3):
-        try:
-            if page.url != snapshot_url:
-                logger.info("[2026] Returning to snapshot dashboard URL (attempt %s): %s", attempt, snapshot_url)
-                page.goto(snapshot_url, wait_until="domcontentloaded", timeout=30000)
-            page.wait_for_function(
-                """
-                () => {
-                    const href = window.location.href;
-                    return href.includes('/reports/reportinghub') &&
-                           !href.includes('/reports/start');
-                }
-                """,
-                timeout=35000,
-            )
-            _ensure_expected_ga4_property(page, report_name)
-            # Some GA4 properties have no visible snapshot summary card or CTA.
-            # The dated reporting-hub route is sufficient because Countries,
-            # Pages, and Traffic Acquisition are opened via direct explorer URLs.
-            page.locator("body").wait_for(state="visible", timeout=5000)
-            if page.locator("ga-card[data-guidedhelpid='summary']").count() == 0:
-                logger.info(
-                    "[2026] Snapshot summary card unavailable for %s; continuing with direct explorer navigation",
-                    report_name,
-                )
-            return page
-        except Exception as e:
-            last_error = e
-            logger.warning(
-                "[2026] Returning to snapshot dashboard timed out on attempt %s: %s",
-                attempt, e,
-            )
-
-    raise last_error
-
-
 def _ga4_report_base_url(url: str) -> str:
     match = re.search(r"^(https://analytics\.google\.com/analytics/web/#/[^/]*p\d+)", url)
     if not match:
@@ -1253,7 +1379,9 @@ def capture_2026(
             _stage_callback(msg)
 
     screenshots: dict[str, Path] = {}
-    out_dir = SCREENSHOTS_DIR / report_name
+    # A private directory for each run prevents a failed capture from finding
+    # last month's PNG at the same filename.
+    out_dir = SCREENSHOTS_DIR / report_name / uuid4().hex
     out_dir.mkdir(parents=True, exist_ok=True)
 
     home_metrics: dict = {}
@@ -1367,79 +1495,35 @@ def capture_2026(
                 page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "countries")
                 page.wait_for_timeout(4000)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
-                end_col = page.locator("th.cdk-column-DEFAULT-engagedSessionsPerUser").first
+                table = page.locator("table.adv-table").first
                 row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
-                start_box = row_num_col.bounding_box()
-                end_box = end_col.bounding_box()
-                table_box = page.locator("table.adv-table").bounding_box()
-                clip = {
-                    "x": start_box["x"],
-                    "y": table_box["y"],
-                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                    "height": table_box["height"],
-                }
+                table.locator("tbody tr").first.wait_for(state="visible", timeout=10000)
+                countries_data = _scrape_countries_table(page)
+                if not countries_data:
+                    raise RuntimeError("GA4 Countries returned no country rows")
                 path = out_dir / "countries_table.png"
-                page.screenshot(path=str(path), clip=clip, full_page=True)
+                capture_ga4_table(page, path, last_column="event count")
                 screenshots["countries_table"] = path
 
-                # Scrape rich country data from table rows
-                # GA4 table inner_text rows: "N\tCountry\tActive Users\tNew Users\tEngaged Sessions\tEngagement Rate\tEng.Sessions/User\tAvg Eng Time"
-                import re as _re
-                body = page.locator("body").inner_text()
-                # Rows format (leading tab + index):
-                # "\t1\tZimbabwe\t21,735 (80.66%)\t19,675 (79.45%)\t15,135 (80.46%)\t47.98%\t0.70\t..."
-                for line in body.splitlines():
-                    m = _re.match(
-                        r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+%)\t([\d.]+)",
-                        line,
-                    )
-                    if m:
-                        countries_data.append({
-                            "country": m.group(1).strip(),
-                            "users": int(m.group(2).replace(",", "")),
-                            "new_users": int(m.group(3).replace(",", "")),
-                            "engaged_sessions": int(m.group(4).replace(",", "")),
-                            "engagement_rate": m.group(5),
-                            "engaged_sessions_per_user": m.group(6),
-                        })
-
-                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
             except Exception as e:
                 logger.warning("[2026] Countries capture failed: %s", e)
 
             # --- Pages and screens: screenshot + scrape page views (Slide 5) ---
             _stage("Capturing pages & screens data...")
             try:
-                page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
                 page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
                 page.wait_for_timeout(4000)
                 row_num_col = page.locator("th.cdk-column-__row_index__").first
-                end_col = page.locator("th.cdk-column-DEFAULT-userEngagementDurationPerUser").first
                 table = page.locator("table.adv-table").first
                 row_num_col.wait_for(state="visible", timeout=10000)
-                page.keyboard.press("End")
-                page.wait_for_timeout(1000)
-                page.mouse.wheel(0, 3000)
-                page.wait_for_timeout(1000)
                 _switch_dimension_to_page_path(page)
-                start_box = row_num_col.bounding_box()
-                end_box = end_col.bounding_box()
-                table_box = table.bounding_box()
-                clip = {
-                    "x": start_box["x"],
-                    "y": table_box["y"],
-                    "width": (end_box["x"] + end_box["width"]) - start_box["x"],
-                    "height": table_box["height"],
-                }
+                table.locator("tbody tr").first.wait_for(state="visible", timeout=10000)
                 path = out_dir / "pages_table.png"
-                page.screenshot(path=str(path), clip=clip, full_page=True)
-                screenshots["pages_table"] = path
-
+                capture_ga4_table(page, path)
                 page_views, pages_data, site_total_views = _scrape_pages_table(page)
+                if not pages_data:
+                    raise RuntimeError("GA4 Pages and screens returned no page rows")
+                screenshots["pages_table"] = path
                 _label_page_paths_with_gemini(pages_data)
             except Exception as e:
                 logger.warning("[2026] Pages & screens capture failed for %s: %s", report_name, e)
@@ -1448,21 +1532,19 @@ def capture_2026(
             if report_name in TRAFFIC_ACQUISITION_REPORTS:
                 _stage("Capturing traffic acquisition data...")
                 try:
-                    page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
                     page = _open_traffic_acquisition_report(page, report_name, snapshot_dashboard_url)
                     table = page.locator("table.adv-table").first
                     table.wait_for(state="visible", timeout=30000)
                     # Scrape while the leading ranked rows and Total row are
                     # still mounted. Scrolling can virtualize those rows away.
                     traffic_acquisition_rows, traffic_acquisition_totals = _scrape_traffic_acquisition_table(page)
+                    if not traffic_acquisition_rows or not traffic_acquisition_totals.get("sessions"):
+                        raise RuntimeError("GA4 Traffic Acquisition returned no channel rows or Total row")
                     path = out_dir / "traffic_acquisition_table.png"
-                    # Capture the table element itself. GA4 properties can expose
-                    # different metric columns, so fixed start/end header selectors
-                    # can crop the wrong data or time out entirely.
-                    table.screenshot(path=str(path))
+                    # Keep the columns used on this slide and capture each row
+                    # completely inside GA4's scrolling table panel.
+                    capture_ga4_table(page, path, last_column="events per session")
                     screenshots["traffic_acquisition_table"] = path
-
-                    page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
                 except Exception as e:
                     logger.warning("[2026] Traffic acquisition capture failed for %s: %s", report_name, e)
 
@@ -1495,6 +1577,77 @@ def capture_2026(
                     logger.warning("[2026] Security headers capture failed for %s: %s", report_name, e)
                 finally:
                     security_page.close()
+
+            # Refresh every Google search result picture in the template.
+            template_key = report_name if report_name in TEMPLATES_2026 else "delta"
+            template = Presentation(str(TEMPLATES_DIR / TEMPLATES_2026[template_key]))
+            seo_slots = _seo_picture_slots(template, report_name)
+            if seo_slots:
+                _stage("Capturing Google search results...")
+                seo_page = context.new_page()
+                try:
+                    for _, _, query, key in seo_slots:
+                        try:
+                            screenshots[key] = capture_google_results(
+                                seo_page, query, out_dir / f"{key}.png",
+                                web_only=report_name in {"dicomm", "mimosa"},
+                            )
+                        except Exception as e:
+                            logger.warning("[2026] Google results capture failed for %s (%s): %s", report_name, query, e)
+                finally:
+                    seo_page.close()
+
+            # A second image on the first Security slide is SiteCheck evidence.
+            if _sitecheck_picture_slot(template, report_name):
+                _stage("Capturing SiteCheck scan...")
+                sitecheck_page = context.new_page()
+                try:
+                    site_url = SECURITY_HEADER_URLS.get(report_name) or GSC_URLS.get(report_name)
+                    if site_url:
+                        screenshots["sitecheck_screenshot"] = capture_sitecheck(
+                            sitecheck_page, site_url, out_dir / "sitecheck.png"
+                        )
+                except Exception as e:
+                    logger.warning("[2026] SiteCheck capture failed for %s: %s", report_name, e)
+                finally:
+                    sitecheck_page.close()
+
+            # A transient GA4 Home load can leave its headline metrics empty even
+            # when the rest of the report drilldowns succeed. Retry Home once at
+            # the end of capture so the report can use the same requested dates
+            # without relying on any prior run's values.
+            missing_home_metrics = [
+                label for label in (
+                    "Active users",
+                    "New users",
+                    "Average engagement time per active user",
+                )
+                if not home_metrics.get(label)
+            ]
+            if missing_home_metrics:
+                try:
+                    logger.warning(
+                        "[2026] Retrying dated GA4 Home metrics for %s; missing: %s",
+                        report_name, ", ".join(missing_home_metrics),
+                    )
+                    page = _goto_ga4_section(page, report_name, "/home")
+                    _set_date_range(page, start_date, end_date)
+                    retry_metrics = _scrape_home_metrics(page)
+                    recovered = []
+                    for label, value in retry_metrics.items():
+                        if value and not home_metrics.get(label):
+                            home_metrics[label] = value
+                            recovered.append(label)
+                    if recovered:
+                        logger.info(
+                            "[2026] Recovered dated GA4 Home metrics for %s: %s",
+                            report_name, ", ".join(recovered),
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "[2026] Dated GA4 Home retry failed for %s: %s",
+                        report_name, e,
+                    )
 
         finally:
             try:
@@ -1531,6 +1684,71 @@ def _performance_month(date_range: str) -> str:
     return f"{matches[0].replace(' ', ',')} - {matches[1].replace(' ', ',')}"
 
 
+def _validate_core_metrics(home_metrics: dict, report_name: str) -> None:
+    """Require both GA4 user counts without assuming one must exceed the other."""
+    for label in ("Active users", "New users"):
+        value = str(home_metrics.get(label, "")).strip()
+        if not re.fullmatch(r"[\d,]+(?:\.\d+)?\s*[KMB]?", value, re.I):
+            raise RuntimeError(f"Cannot generate {report_name} report: GA4 {label} is missing")
+    engagement = str(home_metrics.get("Average engagement time per active user", "")).strip()
+    if not engagement or engagement == "N/A":
+        raise RuntimeError(
+            f"Cannot generate {report_name} report: GA4 average engagement time is missing"
+        )
+
+
+def _required_captures(prs, screenshots: dict, countries_data: list, pages_data: list,
+                       traffic_rows: list, search_metrics: dict, report_name: str) -> dict[int, str]:
+    """Check every data picture in a built-in or quick report before building it."""
+    required = {0: "snapshot_card"}
+    for title, key in (
+        ("Site Overview", "snapshot_card"),
+        ("Geographic Performance", "countries_table"),
+        ("Page Performance", "pages_table"),
+        ("Traffic Acquisition", "traffic_acquisition_table"),
+        ("Search Performance", "search_screenshot"),
+        ("Top Queries", "top_queries_screenshot"),
+        ("Security", "security_headers_screenshot"),
+    ):
+        index = _find_slide_index(prs, title)
+        if index is not None:
+            required[index] = key
+
+    missing = [key for key in required.values()
+               if key not in screenshots or not Path(screenshots[key]).is_file()
+               or Path(screenshots[key]).stat().st_size == 0]
+    for title, rows, label in (
+        ("Geographic Performance", countries_data, "country rows"),
+        ("Page Performance", pages_data, "page rows"),
+        ("Traffic Acquisition", traffic_rows, "acquisition rows"),
+    ):
+        if _find_slide_index(prs, title) is not None and not rows:
+            missing.append(label)
+    if _find_slide_index(prs, "Search Performance") is not None:
+        if any(str(search_metrics.get(key, "")).strip() in {"", "N/A"}
+               for key in ("impressions", "clicks", "ctr", "avg_position")):
+            missing.append("search metrics")
+    if _find_slide_index(prs, "Top Queries") is not None and not search_metrics.get("top_queries"):
+        missing.append("top queries")
+    if missing:
+        raise RuntimeError(f"Cannot generate {report_name} report: current capture missing "
+                           + ", ".join(dict.fromkeys(missing)))
+    return required
+
+
+def _verify_embedded_captures(prs, screenshots: dict, required: dict[int, str], report_name: str) -> None:
+    for slide_index, key in required.items():
+        screenshot_hash = hashlib.sha256(Path(screenshots[key]).read_bytes()).digest()
+        if not any(
+            shape.shape_type == 13 and hashlib.sha256(shape.image.blob).digest() == screenshot_hash
+            for shape in prs.slides[slide_index].shapes
+        ):
+            raise RuntimeError(
+                f"Cannot generate {report_name} report: {key} was not embedded "
+                f"on slide {slide_index + 1}"
+            )
+
+
 def _replace_picture_with_fallback(
     slide,
     image_path: Path,
@@ -1539,6 +1757,7 @@ def _replace_picture_with_fallback(
     min_left_emu: int | None = None,
     exclude_names: set[str] | None = None,
     slot_label: str = "picture",
+    preserve_aspect: bool = False,
 ) -> bool:
     """Replace a picture by known name, then fall back to the largest eligible picture."""
     exclude_names = exclude_names or set()
@@ -1547,9 +1766,28 @@ def _replace_picture_with_fallback(
         if getattr(shape, "shape_type", None) == 13 and shape.name not in exclude_names
     ]
     picture_names = {shape.name for shape in picture_shapes}
+
+    def replace(shape_name: str) -> None:
+        if not preserve_aspect:
+            _replace_image_in_slide(slide, image_path, shape_name=shape_name)
+            return
+        from PIL import Image
+
+        shape = next(shape for shape in picture_shapes if shape.name == shape_name)
+        with Image.open(image_path) as source:
+            image_width, image_height = source.size
+        scale = min(shape.width / image_width, shape.height / image_height)
+        width = round(image_width * scale)
+        height = round(image_height * scale)
+        left = shape.left + (shape.width - width) // 2
+        top = shape.top + (shape.height - height) // 2
+        shape._element.getparent().remove(shape._element)
+        replacement = slide.shapes.add_picture(str(image_path), left, top, width, height)
+        replacement.name = shape_name
+
     for candidate in candidate_names:
         if candidate in picture_names:
-            _replace_image_in_slide(slide, image_path, shape_name=candidate)
+            replace(candidate)
             logger.info("[2026] Replaced %s using shape '%s'", slot_label, candidate)
             return True
 
@@ -1568,7 +1806,7 @@ def _replace_picture_with_fallback(
         return False
 
     largest = max(eligible, key=lambda shape: (shape.width or 0) * (shape.height or 0))
-    _replace_image_in_slide(slide, image_path, shape_name=largest.name)
+    replace(largest.name)
     logger.info("[2026] Replaced %s using fallback shape '%s'", slot_label, largest.name)
     return True
 
@@ -1577,27 +1815,27 @@ def _replace_picture_with_fallback(
 # Shape names are template-specific; Mimosa legitimately uses ``Picture 11``.
 _SLIDE1_KPI_CARD_PICTURE: dict[str, str] = {
     "econet":       "Picture 15",
-    "econet_ai":    "Picture 10",
-    "infraco":      "Picture 13",
-    "ecocash":      "Picture 9",
-    "ecosure":      "Picture 10",
-    "zimplats":     "Picture 12",
-    "cancer_serve": "Picture 9",
-    "dicomm":       "Picture 10",
+    "econet_ai":    "Picture 13",
+    "infraco":      "Picture 12",
+    "ecocash":      "Picture 12",
+    "ecosure":      "Picture 12",
+    "zimplats":     "Picture 9",
+    "cancer_serve": "Picture 14",
+    "dicomm":       "Picture 12",
     "delta":        "Picture 12",
-    "bancabc":      "Picture 12",
+    "bancabc":      "Picture 14",
     "mimosa":       "Picture 11",
 }
 
 _SLIDE3_SNAPSHOT_CARD_PICTURE: dict[str, str] = {
     "econet":       "Picture 18",
-    "econet_ai":    "Picture 19",
-    "infraco":      "Picture 19",
-    "ecocash":      "Picture 19",
-    "ecosure":      "Picture 19",
-    "zimplats":     "Picture 20",
-    "cancer_serve": "Picture 19",
-    "dicomm":       "Picture 19",
+    "econet_ai":    "Picture 18",
+    "infraco":      "Picture 18",
+    "ecocash":      "Picture 18",
+    "ecosure":      "Picture 18",
+    "zimplats":     "Picture 19",
+    "cancer_serve": "Picture 18",
+    "dicomm":       "Picture 18",
     "delta":        "Picture 19",
     "bancabc":      "Picture 19",
     "mimosa":       "Picture 21",
@@ -1605,72 +1843,76 @@ _SLIDE3_SNAPSHOT_CARD_PICTURE: dict[str, str] = {
 
 _SLIDE4_COUNTRIES_TABLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 9",
-    "econet_ai":    "Picture 10",
-    "infraco":      "Picture 10",
+    "econet_ai":    "Picture 9",
+    "infraco":      "Picture 9",
     "ecocash":      "Picture 10",
-    "ecosure":      "Picture 11",
+    "ecosure":      "Picture 9",
     "zimplats":     "Picture 10",
-    "cancer_serve": "Picture 10",
-    "dicomm":       "Picture 10",
+    "cancer_serve": "Picture 9",
+    "dicomm":       "Picture 9",
     "delta":        "Picture 9",
     "bancabc":      "Picture 9",
-    "mimosa":       "Picture 2",
+    "mimosa":       "Picture 10",
 }
 
 _SLIDE5_PAGES_TABLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 10",
-    "econet_ai":    "Picture 12",
-    "infraco":      "Picture 12",
+    "econet_ai":    "Picture 10",
+    "infraco":      "Picture 10",
     "ecocash":      "Picture 11",
-    "ecosure":      "Picture 11",
-    "zimplats":     "Picture 12",
-    "cancer_serve": "Picture 11",
-    "dicomm":       "Picture 11",
-    "delta":        "Picture 7",
+    "ecosure":      "Picture 10",
+    "zimplats":     "Picture 10",
+    "cancer_serve": "Picture 10",
+    "dicomm":       "Picture 10",
+    "delta":        "Picture 6",
     "bancabc":      "Picture 6",
-    "mimosa":       "Picture 5",
+    "mimosa":       "Picture 11",
 }
 
 _SLIDE6_SEARCH_CONSOLE_PICTURE: dict[str, str] = {
     "econet":       "Picture 8",
-    "econet_ai":    "Picture 9",
-    "infraco":      "Picture 8",
-    "ecocash":      "Picture 9",
-    "ecosure":      "Picture 9",
-    "cancer_serve": "Picture 9",
-    "delta":        "Picture 8",
+    "econet_ai":    "Picture 8",
+    "infraco":      "Picture 9",
+    "ecocash":      "Picture 8",
+    "ecosure":      "Picture 8",
+    "cancer_serve": "Picture 8",
+    "delta":        "Picture 10",
     "bancabc":      "Picture 8",
-    "mimosa":       "Picture 9",
+    "mimosa":       "Picture 8",
 }
 
 _TOP_QUERIES_PICTURE: dict[str, str] = {
     "bancabc":      "Picture 13",
-    "cancer_serve": "Picture 1",
-    "delta":        "Picture 17",
-    "ecocash":      "Picture 1",
+    "cancer_serve": "Picture 13",
+    "delta":        "Picture 1",
+    "ecocash":      "Picture 13",
     "econet":       "Picture 13",
-    "econet_ai":    "Picture 14",
-    "ecosure":      "Picture 1",
+    "econet_ai":    "Picture 13",
+    "ecosure":      "Picture 13",
     "infraco":      "Picture 13",
     "mimosa":       "Picture 8",
 }
 
 _SECURITY_HEADERS_PICTURE: dict[str, str] = {
-    "bancabc":   "Picture 6",
-    "delta":     "Picture 12",
+    "bancabc":   "Picture 1",
+    "delta":     "Picture 1",
     "dicomm":    "Picture 2",
-    "ecocash":   "Picture 18",
-    "econet":    "Picture 21",
-    "econet_ai": "Picture 14",
-    "ecosure":   "Picture 8",
-    "mimosa":    "Picture 9",
-    "zimplats":  "Picture 18",
+    "ecocash":   "Picture 17",
+    "econet":    "Picture 1",
+    "econet_ai": "Picture 11",
+    "ecosure":   "Picture 1",
+    "mimosa":    "Picture 12",
+    "zimplats":  "Picture 17",
 }
 
 _SLIDE_TRAFFIC_ACQ_PICTURE: dict[str, str] = {
     report_name: "Picture 32" for report_name in TEMPLATES_2026
 }
 _SLIDE_TRAFFIC_ACQ_PICTURE["bancabc"] = "Picture 21"
+_SLIDE_TRAFFIC_ACQ_PICTURE["delta"] = "Picture 21"
+_SLIDE_TRAFFIC_ACQ_PICTURE["mimosa"] = "Picture 21"
+for _name in ("econet_ai", "infraco", "ecosure", "cancer_serve", "dicomm"):
+    _SLIDE_TRAFFIC_ACQ_PICTURE[_name] = "Picture 21"
 
 
 _SLIDE3_NARRATIVE_SHAPE: dict[str, str] = {
@@ -1709,15 +1951,7 @@ def _fill_paragraph_slots(
 ) -> bool:
     """Fill a text shape's non-empty paragraphs in order."""
     all_paras = list(shape.text_frame.paragraphs)
-    non_empty = [para for para in all_paras if para.text.strip()]
-    if skip_first:
-        # Prefer the designed non-empty slots. If template preparation cleared
-        # them, use the physical paragraphs after the fixed heading/label.
-        paras = non_empty[skip_first:]
-        if not paras:
-            paras = all_paras[skip_first:]
-    else:
-        paras = non_empty or all_paras
+    paras = [para for para in all_paras[skip_first:] if para.text.strip()]
     if not paras:
         return False
 
@@ -1747,6 +1981,7 @@ def _build_slide1(slide, performance_month: str, screenshots: dict, report_name:
             min_left_emu=5 * 914400,
             exclude_names={"Picture 11"} if pic_name != "Picture 11" else set(),
             slot_label=f"{report_name} slide 1 KPI card",
+            preserve_aspect=True,
         )
 
 
@@ -1801,12 +2036,13 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
     exec_texts = _exec_summary_texts(report_name, home_metrics, snapshot_metrics)
     ctr = (search_metrics or {}).get("ctr", "N/A")
     impressions = (search_metrics or {}).get("impressions", "N/A")
+    clicks = (search_metrics or {}).get("clicks", "N/A")
     avg_position = (search_metrics or {}).get("avg_position", "N/A")
 
     para1_text = (
-        f"Organic search generated {impressions} impressions, with a {ctr} click-through rate and an "
-        f"average position of {avg_position}. These results indicate the website's visibility and "
-        "discoverability in search during the period."
+        f"Organic Search generated {clicks} clicks from {impressions} impressions, with a {ctr} "
+        f"click-through rate and an average position of {avg_position}. Together, these metrics "
+        "show search exposure, resulting click volume, and how often impressions led to site visits."
         if ctr != "N/A"
         else ""
     )
@@ -1831,7 +2067,9 @@ def _build_slide2(slide, home_metrics: dict, snapshot_metrics: dict, report_name
         if shape.name == "object 10":
             paras = shape.text_frame.paragraphs
             if len(paras) > 0 and paras[0].text.strip():
-                _fill_text_run(paras[0], exec_texts["new_pct"])
+                _fill_text_run(paras[0], exec_texts["new_users"])
+            if len(paras) > 1 and paras[1].text.strip():
+                _fill_text_run(paras[1], "New Users")
             continue
         if shape.name == "object 11":
             paras = shape.text_frame.paragraphs
@@ -1893,17 +2131,19 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             return int(float(s[:-1]) * 1000)
         return int(float(s))
 
-    try:
-        au = _parse_num(active_users)
-        nu = _parse_num(new_users)
-        new_pct = f"{round(nu / au * 100, 1)}%"
-    except (ValueError, TypeError, ZeroDivisionError):
-        new_pct = "N/A"
-
     subtitle, para0, para2, para4 = _site_overview_paras(report_name, home_metrics, snapshot_metrics)
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
+            continue
+
+        if shape.name == "object 2":
+            # The second paragraph is the editable Site Overview subtitle.
+            # Recent client decks use different wording, so match its position
+            # while respecting templates where that paragraph was removed.
+            paras = shape.text_frame.paragraphs
+            if len(paras) > 1 and paras[1].text.strip():
+                _fill_text_run(paras[1], subtitle)
             continue
 
         # KPI stat boxes — target by shape name + paragraph index to avoid stale-text matching.
@@ -1916,13 +2156,13 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             continue
 
         if shape.name == "object 10":
-            # New Users: para 0 = count, para 1 = "New Users (XX%)" label — update both
+            # New users and active users are separate GA4 metrics; do not label
+            # their ratio as a first-time visitor share.
             paras = shape.text_frame.paragraphs
             if len(paras) > 0 and paras[0].text.strip():
                 _fill_text_run(paras[0], str(new_users))
             if len(paras) > 1 and paras[1].text.strip():
-                label = f"New Users ({new_pct})" if new_pct != "N/A" else "New Users"
-                _fill_text_run(paras[1], label)
+                _fill_text_run(paras[1], "New Users")
             continue
 
         if shape.name == "object 14":
@@ -1964,6 +2204,7 @@ def _build_slide3(slide, home_metrics: dict, snapshot_metrics: dict, report_name
             candidate_names=(pic_name,) if pic_name else ("Picture 18", "Picture 19", "Picture 20"),
             min_left_emu=4 * 914400,
             slot_label=f"{report_name} slide 3 snapshot card",
+            preserve_aspect=True,
         )
     else:
         logger.warning("[2026] No snapshot_card screenshot available for %s slide 3", report_name)
@@ -1997,7 +2238,7 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict, report_n
             # Subtitle: object 2, para index 1
             if shape.name == "object 2":
                 paras = shape.text_frame.paragraphs
-                if len(paras) > 1:
+                if len(paras) > 1 and paras[1].text.strip():
                     _fill_text_run(paras[1], subtitle)
 
             # Narratives: object 6, non-empty paragraphs (even-indexed, odd ones are spacers)
@@ -2012,6 +2253,7 @@ def _build_slide4(slide, countries_data: list[dict], screenshots: dict, report_n
             screenshots["countries_table"],
             candidate_names=(pic_name,) if pic_name else ("Picture 10", "Picture 9", "Picture 11"),
             slot_label=f"{report_name} slide 4 countries table",
+            preserve_aspect=True,
         )
 
 
@@ -2052,6 +2294,7 @@ def _build_slide5(slide, pages_data: list[dict], screenshots: dict, site_total_v
             screenshots["pages_table"],
             candidate_names=(pic_name,) if pic_name else ("Picture 11", "Picture 10", "Picture 13"),
             slot_label=f"{report_name} slide 5 pages table",
+            preserve_aspect=True,
         )
 
 
@@ -2095,7 +2338,7 @@ def _build_slide_traffic_acquisition(
 
         if shape.name == "object 3":
             paragraphs = shape.text_frame.paragraphs
-            if paragraphs:
+            if paragraphs and paragraphs[0].text.strip():
                 _fill_text_run(paragraphs[0], subtitle)
 
         elif shape.name == "object 7":
@@ -2114,6 +2357,7 @@ def _build_slide_traffic_acquisition(
             screenshots["traffic_acquisition_table"],
             candidate_names=(pic_name,) if pic_name else (),
             slot_label=f"{report_name} traffic acquisition table",
+            preserve_aspect=True,
         )
 
 
@@ -2260,6 +2504,7 @@ def _build_slide6(slide, search_metrics: dict, screenshots: dict, report_name: s
             screenshots["search_screenshot"],
             candidate_names=(pic_name,) if pic_name else ("Picture 10", "Picture 8", "Picture 9", "Picture 20"),
             slot_label=f"{report_name} slide 6 search console",
+            preserve_aspect=True,
         )
 
 
@@ -2291,7 +2536,127 @@ def _build_slide_top_queries(slide, search_metrics: dict, screenshots: dict, rep
             screenshots["top_queries_screenshot"],
             candidate_names=(picture_name,) if picture_name else (),
             slot_label=f"{report_name} Top Queries table",
+            preserve_aspect=True,
         )
+
+
+def _security_summary_from_capture(screenshots: dict) -> list[str] | None:
+    """Build security copy from the current scan pages when their text was captured."""
+    security_text = ""
+    sitecheck_text = ""
+    grade = None
+    header_status: dict[str, str] = {}
+    for image_path, key in (
+        (screenshots.get("security_headers_screenshot"), "summary_text"),
+        (screenshots.get("sitecheck_screenshot"), "panel_text"),
+    ):
+        if not image_path:
+            continue
+        metadata_path = Path(image_path).with_suffix(".json")
+        if not metadata_path.is_file():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if key == "summary_text":
+                security_text = str(metadata.get(key) or "")
+                grade = str(metadata.get("grade") or "").strip() or None
+                header_status = {
+                    str(name): str(status)
+                    for name, status in (metadata.get("header_status") or {}).items()
+                    if status in {"present", "missing"}
+                }
+            else:
+                sitecheck_text = str(metadata.get(key) or "")
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Could not read security scan metadata: %s", metadata_path)
+
+    grade_match = re.search(
+        r"\b(?:grade|rating)\s*:?\s*([A-F](?:\+|-)?)(?=\s|$|[^A-Za-z0-9])",
+        security_text, re.I,
+    )
+    if not grade:
+        grade = grade_match.group(1).upper() if grade_match else None
+    if not grade:
+        grade = next(
+            (line.strip().upper() for line in security_text.splitlines()
+             if re.fullmatch(r"\s*[A-F](?:\+|-)?\s*", line)),
+            None,
+        )
+
+    site_lines = [line.strip() for line in sitecheck_text.splitlines() if line.strip()]
+    issue = None
+    malware_status = None
+    for index, line in enumerate(site_lines):
+        lowered = line.casefold()
+        if lowered.startswith(("scan failed", "site issue")):
+            issue = site_lines[index + 1] if index + 1 < len(site_lines) else line
+            break
+        if "no malware found" in lowered:
+            malware_status = "no malware"
+        elif "malware found" in lowered:
+            malware_status = "malware detected"
+
+    blacklist_count_match = re.search(
+        r"(\d+)\s+blacklists?\s+checked", sitecheck_text, re.I
+    )
+    blacklist_count = blacklist_count_match.group(1) if blacklist_count_match else None
+    not_blacklisted = bool(re.search(r"site is not blacklisted", sitecheck_text, re.I))
+    blacklisted = bool(re.search(r"site is blacklisted", sitecheck_text, re.I)) and not not_blacklisted
+
+    present_headers = [name for name, status in header_status.items() if status == "present"]
+    missing_headers = [name for name, status in header_status.items() if status == "missing"]
+    if not grade and not sitecheck_text and not (present_headers or missing_headers):
+        # Keep authored copy only when this run produced no usable security evidence.
+        return None
+    if not any((grade, issue, malware_status, blacklist_count, not_blacklisted, blacklisted,
+                present_headers, missing_headers)):
+        return None
+
+    statements = ["Security Overview"]
+    if grade:
+        statements.append(f"SecurityHeaders.com assigned the site a {grade} grade.")
+    if present_headers or missing_headers:
+        details = []
+        if present_headers:
+            details.append("present: " + ", ".join(present_headers))
+        if missing_headers:
+            details.append("missing: " + ", ".join(missing_headers))
+        statements.append("Security-header checks showed " + "; ".join(details) + ".")
+    elif grade:
+        statements.append(
+            "The captured scan did not expose individual header statuses in its metadata."
+        )
+    if issue:
+        statements.append(f"Sucuri SiteCheck reported: {issue}.")
+    elif malware_status == "no malware":
+        statements.append("Sucuri SiteCheck found no malware in this scan.")
+    elif malware_status == "malware detected":
+        statements.append("Sucuri SiteCheck reported malware; investigate the scan findings.")
+    if blacklist_count and not_blacklisted:
+        statements.append(f"The site was not listed on the {blacklist_count} blacklists checked.")
+    elif blacklist_count and blacklisted:
+        statements.append(f"The site was listed on one or more of the {blacklist_count} blacklists checked.")
+    elif not sitecheck_text:
+        statements.append(
+            "No Sucuri SiteCheck result was captured, so malware and blacklist status are unverified."
+        )
+
+    if issue:
+        statements.append(
+            "Risk Assessment: Malware status remains unverified because Sucuri could not complete "
+            "the scan; resolve the reported issue and rerun it."
+        )
+    elif malware_status == "malware detected" or blacklisted:
+        statements.append("Risk Assessment: Review and address the Sucuri findings shown in the scan.")
+    elif malware_status == "no malware" or not_blacklisted:
+        statements.append("Risk Assessment: Sucuri reported no malware or blacklist listing in this scan.")
+    elif missing_headers:
+        statements.append("Risk Assessment: Review and address the missing security headers listed above.")
+    elif not sitecheck_text:
+        statements.append(
+            "Risk Assessment: Run SiteCheck to verify malware and blacklist status; use the captured header grade as a configuration indicator only."
+        )
+    return statements
 
 
 def _build_slide_security(slide, screenshots: dict, report_name: str = "") -> None:
@@ -2328,7 +2693,12 @@ def _build_slide_security(slide, screenshots: dict, report_name: str = "") -> No
         candidate_names=(picture_name,) if picture_name else (),
         min_left_emu=4 * 914400,
         slot_label=f"{report_name} SecurityHeaders.com result",
+        preserve_aspect=True,
     )
+    narrative = _shape_by_name(slide, "object 5")
+    scan_summary = _security_summary_from_capture(screenshots)
+    if narrative is not None and scan_summary:
+        _fill_paragraph_slots(narrative, scan_summary, clear_extra=True)
 
 
 def _prev_month_date_range(start_date: str) -> tuple[str, str]:
@@ -2410,6 +2780,9 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     """Open Reports snapshot from Home and apply the requested date range."""
     from datetime import datetime as _dt
 
+    expected_start = _dt.strptime(start_date, "%b %d, %Y").strftime("%Y%m%d")
+    expected_end = _dt.strptime(end_date, "%b %d, %Y").strftime("%Y%m%d")
+
     # Re-enter Home through the normal property-switching flow. A bare
     # navigation to ``#/p<id>/home`` is not sufficient here: GA4 can restore
     # the last property from its SPA state and silently redirect to it. This
@@ -2419,31 +2792,44 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
     page.wait_for_timeout(3000)
     _ensure_expected_ga4_property(page, report_name)
     snapshot_url = page.url
-    snapshot_date_btn = page.get_by_role("combobox", name="Open date range picker").first
-    snapshot_date_btn.wait_for(state="visible", timeout=15000)
-    snapshot_date_btn.click()
-    page.wait_for_timeout(1000)
-    page.get_by_role("menuitem").filter(has_text="Custom").click()
-    page.wait_for_timeout(1000)
-    start_input = page.get_by_label("Start date")
-    start_input.wait_for(state="visible", timeout=10000)
-    start_input.click(click_count=3)
-    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
-    page.wait_for_timeout(200)
-    start_input.fill(start_date)
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(500)
-    end_input = page.get_by_label("End date")
-    end_input.click(click_count=3)
-    page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
-    page.wait_for_timeout(200)
-    end_input.fill(end_date)
-    page.keyboard.press("Tab")
-    page.wait_for_timeout(500)
-    page.get_by_role("button", name="Apply").click()
-    expected_start = _dt.strptime(start_date, "%b %d, %Y").strftime("%Y%m%d")
-    expected_end = _dt.strptime(end_date, "%b %d, %Y").strftime("%Y%m%d")
-    page.wait_for_timeout(2500)
+    try:
+        snapshot_date_btn = page.get_by_role("combobox", name="Open date range picker").first
+        snapshot_date_btn.wait_for(state="visible", timeout=15000)
+        snapshot_date_btn.click()
+        page.wait_for_timeout(1000)
+        page.get_by_role("menuitem").filter(has_text="Custom").click(timeout=10000)
+        page.wait_for_timeout(1000)
+        start_input = page.get_by_label("Start date")
+        start_input.wait_for(state="visible", timeout=10000)
+        start_input.click(click_count=3)
+        page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
+        page.wait_for_timeout(200)
+        start_input.fill(start_date)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(500)
+        end_input = page.get_by_label("End date")
+        end_input.click(click_count=3)
+        page.keyboard.press("Meta+a" if os.name == "posix" else "Control+a")
+        page.wait_for_timeout(200)
+        end_input.fill(end_date)
+        page.keyboard.press("Tab")
+        page.wait_for_timeout(500)
+        page.get_by_role("button", name="Apply").click()
+        page.wait_for_timeout(2500)
+    except Exception as e:
+        # GA4 sometimes renders a different date-picker menu (or no Custom
+        # item at all). The reporting-hub URL accepts the same explicit date
+        # parameters, so the UI is not required to continue safely.
+        dated_url = _ga4_dated_snapshot_url(
+            snapshot_url, expected_start, expected_end
+        )
+        logger.warning(
+            "[2026] GA4 date picker unavailable for %s; using dated snapshot URL: %s (%s)",
+            report_name,
+            dated_url,
+            e,
+        )
+        page.goto(dated_url, wait_until="domcontentloaded", timeout=30000)
 
     # GA4 occasionally ignores Custom and rewrites the URL back to
     # ``dateOption=last28Days``. In that case, force the equivalent explicit
@@ -2485,17 +2871,55 @@ def _open_snapshot_and_set_dates(page, report_name: str, start_date: str, end_da
 
 
 def _scrape_countries_table(page) -> list[dict]:
-    countries_data: list[dict] = []
-    import re as _re
+    """Read visible country rows from cells; preserve the text fallback for GA4 variants."""
+    table = page.locator("table.adv-table").first
+    headers = [" ".join(cell.inner_text().casefold().split())
+               for cell in table.locator("thead th").all()]
+
+    def column(label: str) -> int | None:
+        return next((i for i, heading in enumerate(headers) if label in heading), None)
+
+    indices = {
+        "country": column("country"),
+        "users": column("active users"),
+        "new_users": column("new users"),
+        "engaged_sessions": column("engaged sessions"),
+        "engagement_rate": column("engagement rate"),
+        "engaged_sessions_per_user": column("engaged sessions per active user"),
+    }
+    rows: list[dict] = []
+    if all(index is not None for index in indices.values()):
+        for row in table.locator("tbody tr").all():
+            cells = [cell.inner_text().strip() for cell in row.locator("td").all()]
+            if len(cells) <= max(indices.values()):
+                continue
+            value = lambda key: cells[indices[key]]
+            country = value("country").strip()
+            if not country or country.casefold() == "total":
+                continue
+            counts = [re.match(r"^([\d,]+)", value(key))
+                      for key in ("users", "new_users", "engaged_sessions")]
+            if not all(counts):
+                continue
+            rows.append({
+                "country": country,
+                "users": int(counts[0].group(1).replace(",", "")),
+                "new_users": int(counts[1].group(1).replace(",", "")),
+                "engaged_sessions": int(counts[2].group(1).replace(",", "")),
+                "engagement_rate": value("engagement_rate"),
+                "engaged_sessions_per_user": value("engaged_sessions_per_user"),
+            })
+    if rows:
+        return rows
 
     body = page.locator("body").inner_text()
     for line in body.splitlines():
-        m = _re.match(
+        m = re.match(
             r"^\t\d+\t(.+?)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d,]+)\s*\([^)]+\)\t([\d.]+%)\t([\d.]+)",
             line,
         )
         if m:
-            countries_data.append({
+            rows.append({
                 "country": m.group(1).strip(),
                 "users": int(m.group(2).replace(",", "")),
                 "new_users": int(m.group(3).replace(",", "")),
@@ -2503,7 +2927,7 @@ def _scrape_countries_table(page) -> list[dict]:
                 "engagement_rate": m.group(5),
                 "engaged_sessions_per_user": m.group(6),
             })
-    return countries_data
+    return rows
 
 
 def _parse_traffic_acquisition_row(line: str) -> dict | None:
@@ -2585,13 +3009,16 @@ def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
         match = re.search(r"[\d.]+%", value)
         return match.group(0) if match else value
 
-    for row_index in range(min(table_rows.count(), 20)):
-        cells = table_rows.nth(row_index).locator("th, td")
+    # GA4 renders the Total row in <thead> on some report versions and in
+    # <tbody> on others. Inspect both before the table is scrolled for capture.
+    candidate_rows = table.locator("thead tr").all() + table_rows.all()[:20]
+    for row in candidate_rows:
+        cells = row.locator("th, td")
         values = [primary_value(cells.nth(i).inner_text()) for i in range(cells.count())]
         if not any(values):
             continue
 
-        if "Total" in values:
+        if any(value.casefold().startswith("total") for value in values):
             totals = {
                 "sessions": count_value(value_at(values, "sessions")),
                 "engaged_sessions": count_value(value_at(values, "engaged_sessions")),
@@ -2604,7 +3031,7 @@ def _scrape_traffic_acquisition_table(page) -> tuple[list[dict], dict]:
         source_medium = value_at(values, "source_medium")
         sessions_value = value_at(values, "sessions")
         engaged_value = value_at(values, "engaged_sessions")
-        if not source_medium or not sessions_value:
+        if not source_medium or not re.match(r"^[\d,]+", sessions_value):
             continue
         rows.append({
             "source_medium": source_medium,
@@ -2813,12 +3240,10 @@ def _capture_ga4_metrics_no_screenshots(context, report_name: str, start_date: s
         page.wait_for_timeout(4000)
         page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
         countries_data = _scrape_countries_table(page)
-        page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
     except Exception as e:
         logger.warning("[2026] Previous-period countries scrape failed: %s", e)
 
     try:
-        page = _return_to_snapshot_dashboard(page, report_name, snapshot_dashboard_url)
         page = _goto_snapshot_explorer(page, report_name, snapshot_dashboard_url, "pages")
         page.wait_for_timeout(4000)
         page.locator("th.cdk-column-__row_index__").first.wait_for(state="visible", timeout=10000)
@@ -3439,7 +3864,10 @@ def _generate_recommendations_2026(
                 except Exception:
                     pass
 
-    client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
+    client = genai.Client(
+        api_key=os.environ["GEMINI_API_KEY"],
+        http_options={"timeout": 60_000},
+    )
     resp = client.models.generate_content(model="gemini-2.5-flash", contents=contents)
     text = resp.text.strip()
 
@@ -3597,11 +4025,13 @@ def generate_report_2026(
     screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics, traffic_acquisition_rows, traffic_acquisition_totals = capture_2026(
         report_name, start_date, end_date, _stage_callback=_stage_callback
     )
+    _validate_core_metrics(home_metrics, report_name)
 
 
     # Step 2: Load template
     template_path = TEMPLATES_DIR / TEMPLATES_2026[report_name]
     prs = Presentation(str(template_path))
+    _remove_duplicate_security_slides(prs)
     slide_count = len(prs.slides)
     slide_indexes = {
         title: _find_slide_index(prs, title)
@@ -3611,6 +4041,11 @@ def generate_report_2026(
             "Recommendations",
         )
     }
+
+    required_screenshots = _required_captures(
+        prs, screenshots, countries_data, pages_data, traffic_acquisition_rows,
+        search_metrics, report_name,
+    )
 
     perf_month = _performance_month(date_range)
 
@@ -3668,10 +4103,21 @@ def generate_report_2026(
         _stage(f"Building slide {idx + 1} up to complete...")
         _clear_recommendations_slide(prs.slides[idx])
 
+    _apply_supplemental_evidence(prs, report_name, screenshots)
+
+    # Capture success alone is insufficient: a renamed template picture can
+    # prevent replacement and leave an old image on the slide.
+    _verify_embedded_captures(prs, screenshots, required_screenshots, report_name)
+
     # Step 4: Save
     safe_name = report_name.replace("_", "-")
     output_path = OUTPUT_DIR / f"{safe_name}-{report_date.replace(' ', '-')}.pptx"
-    prs.save(str(output_path))
+    pending_path = output_path.with_name(f".{output_path.stem}-{uuid4().hex}.pptx")
+    try:
+        prs.save(str(pending_path))
+        pending_path.replace(output_path)
+    finally:
+        pending_path.unlink(missing_ok=True)
     logger.info("[2026] Saved report to %s", output_path)
     return output_path
 
@@ -3695,6 +4141,12 @@ def generate_quick_report(
     """
     from .generator import GA4_PROPERTIES
 
+    if not gsc_url:
+        raise ValueError(
+            "Quick reports require a website/Search Console URL to refresh "
+            "Search Performance, Top Queries, and Security slides"
+        )
+
     def _stage(msg: str):
         if _stage_callback:
             _stage_callback(msg)
@@ -3711,9 +4163,11 @@ def generate_quick_report(
         screenshots, home_metrics, snapshot_metrics, page_views, pages_data, site_total_views, countries_data, search_metrics, traffic_acquisition_rows, traffic_acquisition_totals = capture_2026(
             report_name, start_date, end_date, _stage_callback=_stage_callback
         )
+        _validate_core_metrics(home_metrics, report_name)
 
         template_path = TEMPLATES_DIR / TEMPLATES_2026["delta"]
         prs = Presentation(str(template_path))
+        _remove_duplicate_security_slides(prs)
         slide_count = len(prs.slides)
         slide_indexes = {
             title: _find_slide_index(prs, title)
@@ -3723,6 +4177,11 @@ def generate_quick_report(
                 "Recommendations",
             )
         }
+
+        required_screenshots = _required_captures(
+            prs, screenshots, countries_data, pages_data, traffic_acquisition_rows,
+            search_metrics, report_name,
+        )
 
         perf_month = _performance_month(date_range)
 
@@ -3779,9 +4238,18 @@ def generate_quick_report(
             _stage(f"Building slide {idx + 1} up to complete...")
             _clear_recommendations_slide(prs.slides[idx])
 
+        _apply_supplemental_evidence(prs, report_name, screenshots)
+
+        _verify_embedded_captures(prs, screenshots, required_screenshots, report_name)
+
         safe_name = report_name.replace("_", "-")
         output_path = OUTPUT_DIR / f"{safe_name}-{report_date.replace(' ', '-')}.pptx"
-        prs.save(str(output_path))
+        pending_path = output_path.with_name(f".{output_path.stem}-{uuid4().hex}.pptx")
+        try:
+            prs.save(str(pending_path))
+            pending_path.replace(output_path)
+        finally:
+            pending_path.unlink(missing_ok=True)
         logger.info("[2026][quick] Saved report to %s", output_path)
         return output_path
     finally:

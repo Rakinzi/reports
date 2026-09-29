@@ -1,0 +1,2 @@
+[   57572ms] [ERROR] TypeError: Cannot read properties of undefined (reading 'view')
+    at w (https://img6.wsimg.com/wrhs/e0592432e621561c33d2ff0014daad2c/consent-main.js:2:83082) @ https://img6.wsimg.com/wrhs/e0592432e621561c33d2ff0014daad2c/consent-main.js:1

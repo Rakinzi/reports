@@ -206,6 +206,13 @@ export const FIELD_TYPES: FieldType[] = [
 		description: 'Gemini-generated paragraph about search performance'
 	},
 	{
+		value: 'narrative_devices',
+		label: 'Narrative: Devices',
+		group: 'AI Narrative',
+		shapeType: 'text',
+		description: 'Gemini-generated paragraph about traffic by device type'
+	},
+	{
 		value: 'subtitle_overview',
 		label: 'Subtitle: Overview',
 		group: 'AI Narrative',
